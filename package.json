@@ -3,6 +3,8 @@
   "private": true,
   "packageManager": "pnpm@10.22.0",
   "scripts": {
+    "autoclaw:doctor": "node scripts/autoclaw-doctor.mjs",
+    "autoclaw:setup": "node scripts/autoclaw-setup.mjs",
     "build": "pnpm -r --if-present build",
     "install:bootstrap": "node scripts/install-caixu.mjs",
     "smoke:agent": "node scripts/agent-driven-smoke.mjs",

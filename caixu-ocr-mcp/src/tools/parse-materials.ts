@@ -7,6 +7,7 @@ import {
   type ToolError,
   makeToolResult
 } from "@caixu/contracts";
+import { ZhipuParserError, parseFileWithZhipu } from "./zhipu-file-parser.js";
 
 const textExtensions = new Set([
   ".txt",
@@ -17,6 +18,8 @@ const textExtensions = new Set([
   ".yaml",
   ".yml"
 ]);
+
+const liveParseExtensions = new Set([".pdf", ".png", ".jpg", ".jpeg"]);
 
 const mimeByExt: Record<string, string> = {
   ".txt": "text/plain",
@@ -41,12 +44,36 @@ function summarizeText(text: string): string {
   return compact.length <= 160 ? compact : `${compact.slice(0, 157)}...`;
 }
 
+function createToolError(input: {
+  code: string;
+  message: string;
+  retryable: boolean;
+  fileId: string;
+}): ToolError {
+  return {
+    code: input.code,
+    message: input.message,
+    retryable: input.retryable,
+    file_id: input.fileId
+  };
+}
+
+function normalizeParseMode(): "auto" | "local" {
+  return process.env.CAIXU_PARSE_MODE === "local" ? "local" : "auto";
+}
+
+function getLiveFileType(filePath: string): string {
+  return extname(filePath).replace(/^\./, "").toUpperCase();
+}
+
 export async function parseMaterialPaths(input: {
   file_paths: string[];
   goal?: string;
 }): Promise<ReturnType<typeof makeToolResult<ParseMaterialsData>>> {
   const parsedFiles: ParsedFile[] = [];
   const failedFiles: ToolError[] = [];
+  const parseMode = normalizeParseMode();
+  const zhipuApiKey = process.env.ZHIPU_API_KEY?.trim() ?? "";
 
   for (const rawPath of input.file_paths) {
     const filePath = resolve(rawPath);
@@ -57,10 +84,12 @@ export async function parseMaterialPaths(input: {
       const mimeType = guessMimeType(filePath);
       const extension = extname(filePath).toLowerCase();
       const isTextLike = textExtensions.has(extension);
+      const isLiveParseCandidate = liveParseExtensions.has(extension);
 
       let extractedText: string | null = null;
       let extractedSummary: string | null = null;
       let parseStatus: ParsedFile["parse_status"] = "binary_only";
+      let provider: ParsedFile["provider"] = "local";
 
       if (isTextLike) {
         extractedText = await readFile(filePath, "utf8");
@@ -70,8 +99,59 @@ export async function parseMaterialPaths(input: {
         extractedText = await readFile(filePath, "utf8");
         extractedSummary = summarizeText(extractedText);
         parseStatus = "parsed";
+      } else if (isLiveParseCandidate && parseMode !== "local") {
+        if (!zhipuApiKey) {
+          failedFiles.push(
+            createToolError({
+              code: "ZHIPU_API_KEY_MISSING",
+              message: `ZHIPU_API_KEY is required to parse ${basename(filePath)} via live OCR`,
+              retryable: false,
+              fileId
+            })
+          );
+          continue;
+        }
+
+        try {
+          extractedText = await parseFileWithZhipu({
+            filePath,
+            mimeType,
+            fileType: getLiveFileType(filePath),
+            apiKey: zhipuApiKey
+          });
+          extractedSummary = extractedText.trim()
+            ? summarizeText(extractedText)
+            : `Live parser returned empty text: ${basename(filePath)}`;
+          parseStatus = "parsed";
+          provider = "zhipu";
+        } catch (error) {
+          if (error instanceof ZhipuParserError) {
+            failedFiles.push(
+              createToolError({
+                code: error.code,
+                message: error.message,
+                retryable: error.retryable,
+                fileId
+              })
+            );
+            continue;
+          }
+
+          failedFiles.push(
+            createToolError({
+              code: "ZHIPU_PARSER_REQUEST_FAILED",
+              message: error instanceof Error ? error.message : "Unknown live parse error",
+              retryable: true,
+              fileId
+            })
+          );
+          continue;
+        }
       } else {
-        extractedSummary = `Binary file recorded for downstream OCR or manual extraction: ${basename(filePath)}`;
+        extractedSummary =
+          parseMode === "local" && isLiveParseCandidate
+            ? `Binary file recorded without live OCR because CAIXU_PARSE_MODE=local: ${basename(filePath)}`
+            : `Binary file recorded for downstream OCR or manual extraction: ${basename(filePath)}`;
       }
 
       parsedFiles.push({
@@ -83,15 +163,17 @@ export async function parseMaterialPaths(input: {
         parse_status: parseStatus,
         extracted_text: extractedText,
         extracted_summary: extractedSummary,
-        provider: "local"
+        provider
       });
     } catch (error) {
-      failedFiles.push({
-        code: "PARSE_MATERIAL_FAILED",
-        message: error instanceof Error ? error.message : "Unknown parse error",
-        retryable: false,
-        file_id: fileId
-      });
+      failedFiles.push(
+        createToolError({
+          code: "PARSE_MATERIAL_FAILED",
+          message: error instanceof Error ? error.message : "Unknown parse error",
+          retryable: false,
+          fileId
+        })
+      );
     }
   }
 

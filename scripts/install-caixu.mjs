@@ -31,7 +31,7 @@ function parseArgs(argv) {
     runtimeDir: join(repoRoot, ".runtime"),
     judgeDemoUrl: process.env.CAIXU_JUDGE_DEMO_URL ?? "http://127.0.0.1:3000/judge-demo",
     zhipuApiKey: process.env.ZHIPU_API_KEY ?? "",
-    parseMode: process.env.CAIXU_PARSE_MODE ?? "local",
+    parseMode: process.env.CAIXU_PARSE_MODE ?? "auto",
     skipInstall: false,
     skipVerify: false,
     skipSmoke: false,
@@ -152,7 +152,7 @@ Options:
   --merge-mcp-config PATH    Merge generated MCP servers into an existing JSON file
   --judge-demo-url URL       Judge demo URL
   --zhipu-api-key KEY        Zhipu API key
-  --parse-mode MODE          Parse mode. Default: local
+  --parse-mode MODE          Parse mode. Default: auto
   --skip-install             Skip pnpm install
   --skip-verify             Skip pnpm test/typecheck/build
   --skip-smoke              Skip pnpm smoke:agent
@@ -248,14 +248,14 @@ fi
   writeExecutable(
     ocrScript,
     `${commonPrefix}
-exec pnpm --dir "$ROOT" --filter @caixu/ocr-mcp dev
+exec node "$ROOT/caixu-ocr-mcp/dist/index.js"
 `
   );
 
   writeExecutable(
     dataScript,
     `${commonPrefix}
-exec pnpm --dir "$ROOT" --filter @caixu/data-mcp dev
+exec node "$ROOT/caixu-data-mcp/dist/index.js"
 `
   );
 

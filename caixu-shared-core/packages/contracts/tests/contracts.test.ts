@@ -60,8 +60,8 @@ describe("@caixu/contracts", () => {
 
   it("supports parse_materials payload with parsed file details", () => {
     const parsed = parseMaterialsDataSchema.parse({
-      file_ids: ["file_001"],
-      parsed_count: 1,
+      file_ids: ["file_001", "file_002"],
+      parsed_count: 2,
       failed_count: 0,
       parsed_files: [
         {
@@ -74,12 +74,23 @@ describe("@caixu/contracts", () => {
           extracted_text: "Transcript",
           extracted_summary: "Plain text transcript",
           provider: "local"
+        },
+        {
+          file_id: "file_002",
+          file_name: "id-card.pdf",
+          file_path: "/tmp/id-card.pdf",
+          mime_type: "application/pdf",
+          size_bytes: 1024,
+          parse_status: "parsed",
+          extracted_text: "ID CARD",
+          extracted_summary: "OCR text",
+          provider: "zhipu"
         }
       ],
       failed_files: []
     });
 
-    expect(parsed.parsed_files[0]?.provider).toBe("local");
+    expect(parsed.parsed_files[1]?.provider).toBe("zhipu");
   });
 
   it("validates a rule profile bundle", () => {
