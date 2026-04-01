@@ -1,15 +1,24 @@
 ---
 name: caixu-build-package
-description: Use when the user wants export files and a submission bundle from an existing library. This skill loads the latest validated lifecycle result, a RuleProfileBundle, assets and parsed files, asks an agent to choose package contents, validates the decision, generates deterministic exports, persists the package run with an audit sidecar, and prepares the final bundle for submit-demo.
+description: Use when the user wants export files and a submission bundle from an existing library. This skill loads the latest validated lifecycle result, a RuleProfileBundle, assets and parsed files, asks an agent to choose package contents, validates the decision, runs deterministic docgen exports, persists the package run with an audit sidecar, and prepares the final bundle for submit-demo.
 ---
 
 # build-package
 
-Use this skill when the user says things like:
+在用户要“生成材料包”“导出资产总表和续办清单”“准备提交包”时使用这个 skill。
 
-- “把材料导出来”
-- “生成实习申请材料包”
-- “导出资产总表和续办清单”
+## Quick flow
+
+1. 读取最近一次已验证的 lifecycle 结果
+2. 让 agent 选材
+3. 预检、导出、写 package run
+
+## Read next only when needed
+
+- 要确认顺序和输入前提时，读 [references/workflow.md](references/workflow.md)
+- 要确认 `PackageRunData`、`package_plan`、导出物约定时，读 [references/tool-contracts.md](references/tool-contracts.md)
+- 要对齐 `package_plan` 和 truthful package 输出时，读 [references/output-patterns.md](references/output-patterns.md)
+- 遇到阻塞 readiness、缺真实文件、truthful package 边界时，读 [references/failure-modes.md](references/failure-modes.md)
 
 ## Required tools
 
@@ -21,33 +30,23 @@ Use this skill when the user says things like:
 
 ## Required local code
 
-- Use the shared `@caixu/docgen` implementation in this repository for actual file generation.
-- Do not rebuild a second packaging convention outside the shared contract.
+- 使用共享 `@caixu/docgen`
+- 不要自行发明第二套导出格式
 
 ## Workflow
 
-1. Require `library_id`, `goal`, `output_dir`, and `submission_profile`.
-2. Load the latest lifecycle result with `get_latest_lifecycle_run`. If no validated lifecycle run exists, fail and recommend `check-lifecycle`.
-3. Load the `RuleProfileBundle` with `get_rule_profile`.
-4. Load assets with `query_assets`, using goal-aligned scenario and validity filters.
-5. Load parsed files with `get_parsed_files` so packaging can resolve real local file paths.
-6. Ask the agent to decide:
-   - `selected_asset_ids`
-   - `operator_notes`
-   - whether blocked readiness still allows a truthful package
-   - any package ordering notes
-7. Validate the agent decision with shared `@caixu/rules` helpers.
-8. Generate ledgers with shared docgen from the validated lifecycle result.
-9. Build the submission zip with shared docgen, using the agent-selected assets and notes.
-10. Persist the package plan with `write_package_run`, including the audit sidecar.
-11. Return `ToolResult<PackageRunData>` with `next_recommended_skill = ["submit-demo"]`.
+1. 要求 `library_id`、`goal`、`output_dir`、`submission_profile`。
+2. 先读 `get_latest_lifecycle_run`；没有已验证 lifecycle 时直接失败并推荐 `check-lifecycle`。
+3. 读取 `RuleProfileBundle`、资产和 parsed files。
+4. 让 agent 决定 `selected_asset_ids`、`operator_notes` 和包内顺序。
+5. 在导出前运行 `scripts/preflight-package-output.mjs`，确认输出目录和源文件都可用。
+6. 用共享 docgen 生成 ledger 和 zip。
+7. 调用 `write_package_run` 持久化 package plan 与 audit。
+8. 成功后推荐下一步 `submit-demo`。
 
 ## Guardrails
 
-- `build-package` consumes readiness. It must not invent a second submission decision source.
-- If readiness is blocking, the agent may still allow a truthful package, but `PackagePlan.readiness` must inherit the validated lifecycle readiness exactly.
-- Do not claim exports exist before the files are actually written.
-- Do not hardcode output names when the shared docgen implementation returns different goal-derived names.
-- The zip must contain real source materials, not only a manifest.
-- If lifecycle data is unavailable, return a structured failure instead of regenerating a checklist from partial context.
-- If the agent selects unknown assets or tries to flip readiness, fail instead of silently correcting the package.
+- `build-package` 只能消费 lifecycle readiness，不能重写 readiness。
+- 即使阻塞，也只允许 truthful package，不能把 blocked 翻成 ready。
+- 不得声称文件已导出，除非文件真实存在。
+- zip 必须包含真实源文件，不是空 manifest。

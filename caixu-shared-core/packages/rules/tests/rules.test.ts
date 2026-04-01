@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { AssetCard, CheckLifecycleData, PackagePlan } from "@caixu/contracts";
+import type { AssetCard, BuildAssetLibraryData, CheckLifecycleData, PackagePlan } from "@caixu/contracts";
 import {
   createAgentDecisionAudit,
   deriveAssetSignals,
   getRuleProfileBundle,
+  validateBuildAssetLibraryDecision,
   validateLifecycleDecision,
   validatePackagePlanDecision
 } from "../src/index.js";
@@ -22,7 +23,10 @@ const baseAsset: Omit<
   validity_status: "long_term",
   reusable_scenarios: ["summer_internship_application"],
   sensitivity_level: "medium",
-  confidence: 0.95
+  confidence: 0.95,
+  asset_state: "active",
+  review_status: "auto",
+  last_verified_at: null
 };
 
 describe("@caixu/rules", () => {
@@ -113,6 +117,64 @@ describe("@caixu/rules", () => {
 
     expect(result.status).toBe("passed");
     expect(result.errors).toHaveLength(0);
+  });
+
+  it("validates build-asset-library decisions and rejects unknown string placeholders", () => {
+    const decision: BuildAssetLibraryData = {
+      library_id: "lib_demo_student_001",
+      asset_cards: [
+        {
+          ...baseAsset,
+          asset_id: "asset_resume_001",
+          title: "Resume",
+          holder_name: null,
+          issuer_name: null,
+          normalized_summary: "Resume summary",
+          source_files: [
+            {
+              file_id: "file_resume_001",
+              file_name: "resume.pdf",
+              mime_type: "application/pdf"
+            }
+          ]
+        }
+      ],
+      merged_assets: [],
+      summary: {
+        total_assets: 1,
+        merged_groups: 0,
+        anomalies: 1,
+        unmerged_assets: 1
+      }
+    };
+
+    const valid = validateBuildAssetLibraryDecision({
+      library_id: "lib_demo_student_001",
+      file_ids: ["file_resume_001"],
+      decision
+    });
+    expect(valid.status).toBe("passed");
+
+    const invalid = validateBuildAssetLibraryDecision({
+      library_id: "lib_demo_student_001",
+      file_ids: ["file_resume_001"],
+      decision: {
+        ...decision,
+        asset_cards: [
+          {
+            ...decision.asset_cards[0],
+            holder_name: "unknown"
+          }
+        ]
+      }
+    });
+
+    expect(invalid.status).toBe("failed");
+    expect(
+      invalid.errors.some(
+        (item) => item.code === "BUILD_ASSET_CARD_HOLDER_UNKNOWN_STRING"
+      )
+    ).toBe(true);
   });
 
   it("fails lifecycle validation when readiness conflicts with blocking items", () => {
@@ -240,18 +302,19 @@ describe("@caixu/rules", () => {
 
   it("creates an agent decision audit with a stable hash", () => {
     const audit = createAgentDecisionAudit({
-      stage: "check_lifecycle",
+      stage: "build_asset_library",
       library_id: "lib_demo_student_001",
-      goal: "summer_internship_application",
-      profile_id: "summer_internship_application",
-      model: "glm-5",
+      goal: "build_asset_library",
+      profile_id: "build_asset_library",
+      model: "glm-4.6",
       input_asset_ids: ["asset_transcript_001"],
+      input_file_ids: ["file_transcript_001"],
       input_summary: "One transcript asset.",
       validation_status: "passed",
       result: { ok: true }
     });
 
-    expect(audit.stage).toBe("check_lifecycle");
+    expect(audit.stage).toBe("build_asset_library");
     expect(audit.result_hash).toHaveLength(40);
   });
 });

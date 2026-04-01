@@ -7,6 +7,7 @@ const repoRoot = join(import.meta.dirname, "..", "..");
 const skills = [
   "caixu-ingest-materials",
   "caixu-build-asset-library",
+  "caixu-maintain-asset-library",
   "caixu-query-assets",
   "caixu-check-lifecycle",
   "caixu-build-package",
@@ -15,10 +16,23 @@ const skills = [
 
 const validTools = new Set([
   "caixu-data-mcp.create_or_load_library",
-  "caixu-ocr-mcp.parse_materials",
+  "caixu-data-mcp.list_libraries",
+  "caixu-data-mcp.get_library_overview",
+  "caixu-data-mcp.create_pipeline_run",
+  "caixu-data-mcp.append_pipeline_step",
+  "caixu-data-mcp.complete_pipeline_run",
+  "caixu-ocr-mcp.list_local_files",
+  "caixu-ocr-mcp.read_local_text_file",
+  "caixu-ocr-mcp.extract_parser_text",
+  "caixu-ocr-mcp.extract_visual_text",
+  "caixu-ocr-mcp.render_pdf_pages",
   "caixu-data-mcp.upsert_parsed_files",
   "caixu-data-mcp.get_parsed_files",
   "caixu-data-mcp.upsert_asset_cards",
+  "caixu-data-mcp.patch_asset_card",
+  "caixu-data-mcp.archive_asset",
+  "caixu-data-mcp.restore_asset",
+  "caixu-data-mcp.list_review_queue",
   "caixu-data-mcp.upsert_merged_assets",
   "caixu-data-mcp.query_assets",
   "caixu-data-mcp.get_rule_profile",
@@ -30,8 +44,12 @@ const validTools = new Set([
   "caixu-data-mcp.write_execution_log"
 ]);
 
+function read(relativePath: string): string {
+  return readFileSync(join(repoRoot, relativePath), "utf8");
+}
+
 function skillText(skillDir: string): string {
-  return readFileSync(join(repoRoot, skillDir, "SKILL.md"), "utf8");
+  return read(`${skillDir}/SKILL.md`);
 }
 
 function requiredTools(text: string): string[] {
@@ -40,10 +58,12 @@ function requiredTools(text: string): string[] {
 }
 
 describe("skill robustness", () => {
-  it("every skill has frontmatter and core sections", () => {
+  it("every skill keeps concise package-style structure in SKILL.md", () => {
     for (const skill of skills) {
       const text = skillText(skill);
       expect(text.startsWith("---\nname:")).toBe(true);
+      expect(text).toContain("## Quick flow");
+      expect(text).toContain("## Read next only when needed");
       expect(text).toContain("## Required tools");
       expect(text).toContain("## Workflow");
       expect(text).toContain("## Guardrails");
@@ -59,52 +79,94 @@ describe("skill robustness", () => {
     }
   });
 
-  it("submit-demo documents the package id alias explicitly", () => {
-    const text = skillText("caixu-submit-demo");
-    expect(text).toContain("`package_plan_id` or `package_id`");
-    expect(text).toContain("Resolve `package_plan_id` to the stored `package_id`");
-    expect(text).toContain("Required runtime");
-    expect(text).toContain("non-empty `failure_reason`");
+  it("submit-demo documents package id alias, dry_run, preflight, and browser logging expectations", () => {
+    const skill = skillText("caixu-submit-demo");
+    const contracts = read("caixu-submit-demo/references/tool-contracts.md");
+    const failureModes = read("caixu-submit-demo/references/failure-modes.md");
+
+    expect(skill).toContain("`package_plan_id` or `package_id`");
+    expect(skill).toContain("`dry_run?`");
+    expect(skill).toContain("AutoClaw/OpenClaw");
+    expect(skill).toContain("scripts/preflight-submit.mjs");
+    expect(contracts).toContain("`execution_log`");
+    expect(failureModes).toContain("`failure_reason`");
   });
 
-  it("check-lifecycle resolves relative dates to absolute dates", () => {
-    const text = skillText("caixu-check-lifecycle");
-    expect(text).toContain("YYYY-MM-DD");
-    expect(text).toContain("Resolve any relative date words");
-    expect(text).toContain("@caixu/rules");
-    expect(text).toContain("Unknown goals must fail");
-    expect(text).toContain("RuleProfileBundle");
-    expect(text).toContain("validate the agent output");
+  it("check-lifecycle documents agent-main validation flow and audit boundaries", () => {
+    const skill = skillText("caixu-check-lifecycle");
+    const workflow = read("caixu-check-lifecycle/references/workflow.md");
+    const contracts = read("caixu-check-lifecycle/references/tool-contracts.md");
+    const failureModes = read("caixu-check-lifecycle/references/failure-modes.md");
+
+    expect(skill).toContain("YYYY-MM-DD");
+    expect(skill).toContain("scripts/validate-lifecycle-payload.mjs");
+    expect(skill).toContain("write_lifecycle_run");
+    expect(workflow).toContain("RuleProfileBundle");
+    expect(contracts).toContain("`readiness` 是唯一正式“是否可提交”来源");
+    expect(failureModes).toContain("schema 不完整");
   });
 
-  it("build-asset-library prevents fabricating cards for binary-only files", () => {
-    const text = skillText("caixu-build-asset-library");
-    expect(text).toContain("Skip `binary_only` files");
-    expect(text).toContain("do not fabricate asset cards");
-    expect(text).toContain("`library_id`");
-    expect(text).toContain("deterministic id from `library_id` and `file_id`");
+  it("build-asset-library preserves conservative extraction and merge constraints", () => {
+    const skill = skillText("caixu-build-asset-library");
+    const contracts = read("caixu-build-asset-library/references/tool-contracts.md");
+    const failureModes = read("caixu-build-asset-library/references/failure-modes.md");
+
+    expect(skill).toContain("`binary_only`");
+    expect(skill).toContain("不合并");
+    expect(contracts).toContain("`library_id + file_id`");
+    expect(failureModes).toContain("不能直接生成 `asset_card`");
   });
 
-  it("build-package points to shared docgen and real output_dir", () => {
-    const text = skillText("caixu-build-package");
-    expect(text).toContain("@caixu/docgen");
-    expect(text).toContain("`output_dir`");
-    expect(text).toContain("get_latest_lifecycle_run");
-    expect(text).toContain("get_rule_profile");
-    expect(text).toContain("The zip must contain real source materials");
-    expect(text).toContain("selected_asset_ids");
+  it("build-package points to shared docgen, readiness inheritance, and real output preflight", () => {
+    const skill = skillText("caixu-build-package");
+    const workflow = read("caixu-build-package/references/workflow.md");
+    const failureModes = read("caixu-build-package/references/failure-modes.md");
+
+    expect(skill).toContain("@caixu/docgen");
+    expect(skill).toContain("`output_dir`");
+    expect(skill).toContain("scripts/preflight-package-output.mjs");
+    expect(workflow).toContain("Agent 不应决定");
+    expect(failureModes).toContain("不能把 `ready_for_submission = false` 翻成 `true`");
   });
 
-  it("query-assets documents canonical filter normalization and asset-library preconditions", () => {
-    const text = skillText("caixu-query-assets");
-    expect(text).toContain("The library must have completed at least one successful `build-asset-library` run.");
-    expect(text).toContain("Chinese category mapping");
-    expect(text).toContain("`证明类` -> `proof`");
+  it("maintain-asset-library keeps manual-maintenance boundaries and verification loop", () => {
+    const skill = skillText("caixu-maintain-asset-library");
+    const workflow = read("caixu-maintain-asset-library/references/workflow.md");
+    const contracts = read("caixu-maintain-asset-library/references/tool-contracts.md");
+    const failureModes = read("caixu-maintain-asset-library/references/failure-modes.md");
+
+    expect(skill).toContain("`patch_asset_card`");
+    expect(skill).toContain("`archive_asset`");
+    expect(skill).toContain("`restore_asset`");
+    expect(skill).toContain("`query_assets`");
+    expect(workflow).toContain("默认一次只处理一条资产");
+    expect(contracts).toContain("默认查询只消费 `active` 资产");
+    expect(failureModes).toContain("不做物理删除");
   });
 
-  it("ingest-materials returns library_id and persists parsed_files explicitly", () => {
-    const text = skillText("caixu-ingest-materials");
-    expect(text).toContain("`data.library_id`");
-    expect(text).toContain("returned `parsed_files`");
+  it("query-assets keeps canonical mapping and empty-result boundaries in references", () => {
+    const skill = skillText("caixu-query-assets");
+    const workflow = read("caixu-query-assets/references/workflow.md");
+    const failureModes = read("caixu-query-assets/references/failure-modes.md");
+
+    expect(skill).toContain("有界查询");
+    expect(workflow).toContain("`证明类` -> `proof`");
+    expect(workflow).toContain("`实习申请` -> `summer_internship_application`");
+    expect(failureModes).toContain("不伪造命中");
+  });
+
+  it("ingest-materials keeps persistence boundary and provider awareness", () => {
+    const skill = skillText("caixu-ingest-materials");
+    const contracts = read("caixu-ingest-materials/references/tool-contracts.md");
+    const failureModes = read("caixu-ingest-materials/references/failure-modes.md");
+
+    expect(skill).toContain("`data.library_id`");
+    expect(skill).toContain("`caixu-ocr-mcp.list_local_files`");
+    expect(skill).toContain("`caixu-ocr-mcp.extract_parser_text`");
+    expect(skill).toContain("`caixu-ocr-mcp.extract_visual_text`");
+    expect(skill).toContain("`caixu-data-mcp.create_pipeline_run`");
+    expect(contracts).toContain("`zhipu_parser_lite`");
+    expect(contracts).toContain("`skip`");
+    expect(failureModes).toContain("不要声称材料已经进入库");
   });
 });

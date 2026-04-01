@@ -98,6 +98,18 @@ importers:
         specifier: workspace:*
         version: link:../contracts
 
+  caixu-shared-core/packages/skill-runner:
+    dependencies:
+      '@caixu/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@caixu/rules':
+        specifier: workspace:*
+        version: link:../rules
+      zod:
+        specifier: ^4.3.6
+        version: 4.3.6
+
   caixu-shared-core/packages/storage:
     dependencies:
       '@caixu/contracts':

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Caixu Query"
+  short_description: "Query a Caixu asset library with canonical filters"
+  default_prompt: "Use $caixu-query-assets to normalize the user's filter intent into canonical values, run a deterministic query against caixu-data-mcp, and return stored assets without re-running extraction."

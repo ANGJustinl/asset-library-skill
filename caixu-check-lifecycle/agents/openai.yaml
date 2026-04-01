@@ -1,0 +1,4 @@
+interface:
+  display_name: "Caixu Lifecycle"
+  short_description: "Have an agent judge lifecycle, missing items, and readiness"
+  default_prompt: "Use $caixu-check-lifecycle to load assets and a rule profile, ask the agent for a complete CheckLifecycleData decision, validate it, write audit metadata, and persist only accepted runs."

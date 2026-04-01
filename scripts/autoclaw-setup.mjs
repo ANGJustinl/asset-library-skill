@@ -29,16 +29,29 @@ function parseArgs(argv) {
   const options = {
     autoClawHome: process.env.CAIXU_AUTOCLAW_HOME ?? "",
     judgeDemoUrl: process.env.CAIXU_JUDGE_DEMO_URL ?? "",
+    agentApiKey: process.env.CAIXU_AGENT_API_KEY ?? "",
+    agentModel: process.env.CAIXU_AGENT_MODEL ?? "",
+    agentTimeoutMs: process.env.CAIXU_AGENT_TIMEOUT_MS ?? "",
+    agentHttpMaxAttempts: process.env.CAIXU_AGENT_HTTP_MAX_ATTEMPTS ?? "",
+    agentHttpBaseDelayMs: process.env.CAIXU_AGENT_HTTP_BASE_DELAY_MS ?? "",
+    agentHttpMaxDelayMs: process.env.CAIXU_AGENT_HTTP_MAX_DELAY_MS ?? "",
+    agentMinIntervalMs: process.env.CAIXU_AGENT_MIN_INTERVAL_MS ?? "",
     zhipuApiKey: process.env.ZHIPU_API_KEY ?? "",
     zhipuParserApiKey: process.env.CAIXU_ZHIPU_PARSER_API_KEY ?? "",
     zhipuOcrApiKey: process.env.CAIXU_ZHIPU_OCR_API_KEY ?? "",
     zhipuVlmApiKey: process.env.CAIXU_ZHIPU_VLM_API_KEY ?? "",
     sqlitePath: process.env.CAIXU_SQLITE_PATH ?? "",
     parseMode: process.env.CAIXU_PARSE_MODE ?? "",
+    cliProgress: process.env.CAIXU_CLI_PROGRESS ?? "",
+    cliHeartbeatMs: process.env.CAIXU_CLI_HEARTBEAT_MS ?? "",
     zhipuParserMode: process.env.CAIXU_ZHIPU_PARSER_MODE ?? "",
     zhipuOcrEnabled: process.env.CAIXU_ZHIPU_OCR_ENABLED ?? "",
     vlmModel: process.env.CAIXU_VLM_MODEL ?? "",
     vlmPdfRenderer: process.env.CAIXU_VLM_PDF_RENDERER ?? "",
+    zhipuHttpMaxAttempts: process.env.CAIXU_ZHIPU_HTTP_MAX_ATTEMPTS ?? "",
+    zhipuHttpBaseDelayMs: process.env.CAIXU_ZHIPU_HTTP_BASE_DELAY_MS ?? "",
+    zhipuHttpMaxDelayMs: process.env.CAIXU_ZHIPU_HTTP_MAX_DELAY_MS ?? "",
+    zhipuMinIntervalMs: process.env.CAIXU_ZHIPU_MIN_INTERVAL_MS ?? "",
     yes: false
   };
 
@@ -64,6 +77,41 @@ function parseArgs(argv) {
     }
     if (arg === "--judge-demo-url") {
       options.judgeDemoUrl = next ?? "";
+      index += 1;
+      continue;
+    }
+    if (arg === "--agent-api-key") {
+      options.agentApiKey = next ?? "";
+      index += 1;
+      continue;
+    }
+    if (arg === "--agent-model") {
+      options.agentModel = next ?? "";
+      index += 1;
+      continue;
+    }
+    if (arg === "--agent-timeout-ms") {
+      options.agentTimeoutMs = next ?? "";
+      index += 1;
+      continue;
+    }
+    if (arg === "--agent-http-max-attempts") {
+      options.agentHttpMaxAttempts = next ?? "";
+      index += 1;
+      continue;
+    }
+    if (arg === "--agent-http-base-delay-ms") {
+      options.agentHttpBaseDelayMs = next ?? "";
+      index += 1;
+      continue;
+    }
+    if (arg === "--agent-http-max-delay-ms") {
+      options.agentHttpMaxDelayMs = next ?? "";
+      index += 1;
+      continue;
+    }
+    if (arg === "--agent-min-interval-ms") {
+      options.agentMinIntervalMs = next ?? "";
       index += 1;
       continue;
     }
@@ -97,6 +145,16 @@ function parseArgs(argv) {
       index += 1;
       continue;
     }
+    if (arg === "--cli-progress") {
+      options.cliProgress = next ?? "";
+      index += 1;
+      continue;
+    }
+    if (arg === "--cli-heartbeat-ms") {
+      options.cliHeartbeatMs = next ?? "";
+      index += 1;
+      continue;
+    }
     if (arg === "--zhipu-parser-mode") {
       options.zhipuParserMode = next ?? "";
       index += 1;
@@ -117,6 +175,26 @@ function parseArgs(argv) {
       index += 1;
       continue;
     }
+    if (arg === "--zhipu-http-max-attempts") {
+      options.zhipuHttpMaxAttempts = next ?? "";
+      index += 1;
+      continue;
+    }
+    if (arg === "--zhipu-http-base-delay-ms") {
+      options.zhipuHttpBaseDelayMs = next ?? "";
+      index += 1;
+      continue;
+    }
+    if (arg === "--zhipu-http-max-delay-ms") {
+      options.zhipuHttpMaxDelayMs = next ?? "";
+      index += 1;
+      continue;
+    }
+    if (arg === "--zhipu-min-interval-ms") {
+      options.zhipuMinIntervalMs = next ?? "";
+      index += 1;
+      continue;
+    }
 
     throw new Error(`Unknown argument: ${arg}`);
   }
@@ -131,16 +209,29 @@ function printHelp() {
 Options:
   --autoclaw-home PATH   Explicit AutoClaw profile directory. Default: ~/.openclaw-autoclaw
   --judge-demo-url URL   Judge demo URL
+  --agent-api-key KEY    Agent model key for build-asset-library/check-lifecycle/build-package
+  --agent-model MODEL    Agent model code. Default: glm-4.6
+  --agent-timeout-ms N   Single agent request timeout in milliseconds
+  --agent-http-max-attempts N
+  --agent-http-base-delay-ms N
+  --agent-http-max-delay-ms N
+  --agent-min-interval-ms N
   --zhipu-api-key KEY    Zhipu API key for live OCR
   --zhipu-parser-api-key KEY  Zhipu parser key. Falls back to ZHIPU_API_KEY
   --zhipu-ocr-api-key KEY     Zhipu OCR key. Falls back to parser key or ZHIPU_API_KEY
   --zhipu-vlm-api-key KEY     Zhipu VLM key. Falls back to ZHIPU_API_KEY
   --sqlite-path PATH     SQLite file path
   --parse-mode MODE      Parse mode. Default: auto
+  --cli-progress BOOL    Enable progress.jsonl event output: true or false
+  --cli-heartbeat-ms N   Heartbeat interval for progress.jsonl in milliseconds
   --zhipu-parser-mode    Parser mode: lite or export. Default: lite
   --zhipu-ocr-enabled    Enable paid layout_parsing OCR: true or false. Default: false
   --vlm-model MODEL      VLM fallback model. Default: glm-4.6v
   --vlm-pdf-renderer     PDF renderer for VLM fallback: pdftoppm or pdftocairo
+  --zhipu-http-max-attempts N
+  --zhipu-http-base-delay-ms N
+  --zhipu-http-max-delay-ms N
+  --zhipu-min-interval-ms N
   --yes                  Non-interactive mode. Use defaults and overwrite after prompting logic
   --help                 Show this help
 `);
@@ -248,12 +339,16 @@ async function main() {
   try {
     const baseRuntime = resolveRuntimeConfig(paths, {
       judgeDemoUrl: options.judgeDemoUrl || undefined,
+      agentApiKey: options.agentApiKey || undefined,
+      agentModel: options.agentModel || undefined,
       zhipuApiKey: options.zhipuApiKey || undefined,
       zhipuParserApiKey: options.zhipuParserApiKey || undefined,
       zhipuOcrApiKey: options.zhipuOcrApiKey || undefined,
       zhipuVlmApiKey: options.zhipuVlmApiKey || undefined,
       sqlitePath: options.sqlitePath || undefined,
       parseMode: options.parseMode || undefined,
+      cliProgress: options.cliProgress || undefined,
+      cliHeartbeatMs: options.cliHeartbeatMs || undefined,
       zhipuParserMode: options.zhipuParserMode || undefined,
       zhipuOcrEnabled: options.zhipuOcrEnabled || undefined,
       vlmModel: options.vlmModel || undefined,
@@ -436,10 +531,23 @@ async function main() {
         baseRuntime.judgeDemoUrl,
         options
       ),
+      agentModel: await promptText(
+        rl,
+        "CAIXU_AGENT_MODEL",
+        baseRuntime.agentModel,
+        options
+      ),
       sqlitePath: await promptText(
         rl,
         "CAIXU_SQLITE_PATH",
         baseRuntime.sqlitePath,
+        options
+      ),
+      agentApiKey: await promptSecret(
+        rl,
+        "CAIXU_AGENT_API_KEY",
+        baseRuntime.agentApiKey ? `${baseRuntime.agentApiKey.slice(0, 4)}***` : "",
+        baseRuntime.agentApiKey,
         options
       ),
       zhipuApiKey: await promptSecret(

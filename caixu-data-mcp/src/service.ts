@@ -1,12 +1,26 @@
 import { join } from "node:path";
 import {
+  type ExtractParserTextData,
+  type ExtractVisualTextData,
+  type ListLocalFilesData,
+  type LocalFile,
   type AgentDecisionAudit,
   type AssetCard,
+  type AssetState,
   type ExecutionLog,
   type LifecycleRunData,
+  type ListLibrariesData,
+  type LibraryOverview,
   type MergedAsset,
   type PackageRunData,
+  type PatchAssetCardData,
+  type PipelineRunData,
+  type PipelineStep,
   type ParsedFile,
+  type ReadLocalTextFileData,
+  type RenderPdfPagesData,
+  type ReviewQueueData,
+  type ReviewStatus,
   makeToolResult
 } from "@caixu/contracts";
 import { getSubmissionProfile } from "@caixu/executor-profiles";
@@ -22,9 +36,94 @@ export function createDataService(dbPath = defaultDbPath()) {
 
   return {
     close: () => storage.close(),
+    writeAgentDecisionAudit(input: {
+      audit: AgentDecisionAudit;
+      run_ref_type: "asset_library_build" | "lifecycle_run" | "package_run";
+      run_ref_id: string;
+    }) {
+      const audit = storage.writeAgentDecisionAudit(input.audit, {
+        type: input.run_ref_type,
+        id: input.run_ref_id
+      });
+      return makeToolResult("success", { audit });
+    },
     createOrLoadLibrary(input: { library_id?: string; owner_hint?: string }) {
       const library = storage.createOrLoadLibrary(input.library_id, input.owner_hint);
       return makeToolResult("success", { library_id: library.library_id });
+    },
+    listLibraries() {
+      return makeToolResult<ListLibrariesData>("success", storage.listLibraries());
+    },
+    getLibraryOverview(input: { library_id: string }) {
+      const overview = storage.getLibraryOverview(input.library_id);
+      return makeToolResult<LibraryOverview | undefined>(
+        overview ? "success" : "failed",
+        overview ?? undefined
+      );
+    },
+    createPipelineRun(input: {
+      run_id?: string;
+      library_id: string;
+      run_type: "ingest" | "build_asset_library";
+      goal?: string;
+      input_root?: string;
+      latest_stage?: string;
+    }) {
+      const pipelineRun = storage.createPipelineRun({
+        runId: input.run_id,
+        libraryId: input.library_id,
+        runType: input.run_type,
+        goal: input.goal,
+        inputRoot: input.input_root,
+        latestStage: input.latest_stage
+      });
+      return makeToolResult("success", {
+        pipeline_run: pipelineRun,
+        steps: []
+      } satisfies PipelineRunData);
+    },
+    appendPipelineStep(input: {
+      run_id: string;
+      stage: string;
+      status: PipelineStep["status"];
+      tool_name?: string;
+      message: string;
+      payload_json?: unknown;
+    }) {
+      const step = storage.appendPipelineStep({
+        runId: input.run_id,
+        stage: input.stage,
+        status: input.status,
+        toolName: input.tool_name,
+        message: input.message,
+        payload: input.payload_json ?? null
+      });
+      return makeToolResult("success", { step });
+    },
+    getPipelineRun(input: { run_id: string; step_limit?: number }) {
+      const run = storage.getPipelineRun(input.run_id, input.step_limit ?? 50);
+      return makeToolResult(run?.pipeline_run ? "success" : "failed", run ?? undefined);
+    },
+    completePipelineRun(input: {
+      run_id: string;
+      status: "completed" | "partial" | "failed";
+      latest_stage: string;
+      counts: {
+        parsed: number;
+        failed: number;
+        warnings: number;
+        skipped: number;
+        assets: number;
+        merged: number;
+      };
+    }) {
+      const run = storage.completePipelineRun({
+        runId: input.run_id,
+        status: input.status,
+        latestStage: input.latest_stage,
+        counts: input.counts
+      });
+      return makeToolResult(run?.pipeline_run ? "success" : "failed", run ?? undefined);
     },
     upsertParsedFiles(input: { library_id: string; parsed_files: ParsedFile[] }) {
       const files = storage.upsertParsedFiles(input.library_id, input.parsed_files);
@@ -54,6 +153,8 @@ export function createDataService(dbPath = defaultDbPath()) {
       keyword?: string;
       reusable_scenario?: string;
       validity_statuses?: string[];
+      asset_states?: AssetState[];
+      review_statuses?: ReviewStatus[];
     }) {
       try {
         return makeToolResult("success", storage.queryAssets(input));
@@ -78,6 +179,67 @@ export function createDataService(dbPath = defaultDbPath()) {
         library_id: input.library_id,
         merged_assets: mergedAssets
       });
+    },
+    patchAssetCard(input: {
+      library_id: string;
+      asset_id: string;
+      patch: Partial<
+        Pick<
+          AssetCard,
+          | "title"
+          | "holder_name"
+          | "issuer_name"
+          | "issue_date"
+          | "expiry_date"
+          | "validity_status"
+          | "reusable_scenarios"
+          | "sensitivity_level"
+          | "normalized_summary"
+          | "review_status"
+          | "last_verified_at"
+        >
+      >;
+    }) {
+      const result = storage.patchAssetCard(input.library_id, input.asset_id, input.patch);
+      return makeToolResult<PatchAssetCardData | undefined>(
+        result ? "success" : "failed",
+        result
+          ? {
+              library_id: input.library_id,
+              asset_card: result.asset_card,
+              change_event: result.change_event
+            }
+          : undefined
+      );
+    },
+    archiveAsset(input: { library_id: string; asset_id: string }) {
+      const result = storage.setAssetState(input.library_id, input.asset_id, "archived");
+      return makeToolResult<PatchAssetCardData | undefined>(
+        result ? "success" : "failed",
+        result
+          ? {
+              library_id: input.library_id,
+              asset_card: result.asset_card,
+              change_event: result.change_event
+            }
+          : undefined
+      );
+    },
+    restoreAsset(input: { library_id: string; asset_id: string }) {
+      const result = storage.setAssetState(input.library_id, input.asset_id, "active");
+      return makeToolResult<PatchAssetCardData | undefined>(
+        result ? "success" : "failed",
+        result
+          ? {
+              library_id: input.library_id,
+              asset_card: result.asset_card,
+              change_event: result.change_event
+            }
+          : undefined
+      );
+    },
+    listReviewQueue(input: { library_id: string }) {
+      return makeToolResult<ReviewQueueData>("success", storage.listReviewQueue(input.library_id));
     },
     writeLifecycleRun(input: {
       run_id: string;

@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type {
   AgentDecisionAudit,
   AssetCard,
+  BuildAssetLibraryData,
   CheckLifecycleData,
   LifecycleEvent,
   MissingItem,
@@ -14,6 +15,7 @@ import type {
 } from "@caixu/contracts";
 import {
   agentDecisionAuditSchema,
+  buildAssetLibraryDataSchema,
   checkLifecycleDataSchema,
   packagePlanSchema
 } from "@caixu/contracts";
@@ -261,6 +263,7 @@ export function createAgentDecisionAudit(input: {
   profile_id: string;
   model: string;
   input_asset_ids: string[];
+  input_file_ids?: string[];
   input_summary: string;
   validation_status: AgentDecisionAudit["validation_status"];
   validation_errors?: ToolError[];
@@ -278,6 +281,7 @@ export function createAgentDecisionAudit(input: {
     profile_id: input.profile_id,
     model: input.model,
     input_asset_ids: input.input_asset_ids,
+    input_file_ids: input.input_file_ids ?? [],
     input_summary: input.input_summary,
     validation_status: input.validation_status,
     validation_errors: input.validation_errors ?? [],
@@ -290,6 +294,210 @@ export function createAgentDecisionAudit(input: {
 
 export function serializeAgentDecisionAudit(audit: AgentDecisionAudit): string {
   return JSON.stringify(audit);
+}
+
+export function validateBuildAssetLibraryDecision(input: {
+  library_id: string;
+  file_ids: string[];
+  existing_asset_ids?: string[];
+  decision: BuildAssetLibraryData;
+}): DecisionValidationResult {
+  const parsed = buildAssetLibraryDataSchema.safeParse(input.decision);
+  const errors: ToolError[] = [];
+
+  if (!parsed.success) {
+    return {
+      status: "failed",
+      errors: [
+        validationError(
+          "BUILD_ASSET_LIBRARY_SCHEMA_INVALID",
+          parsed.error.issues
+            .map((issue) => `${issue.path.join(".") || "root"}: ${issue.message}`)
+            .join("; ")
+        )
+      ]
+    };
+  }
+
+  const decision = parsed.data;
+  const fileIds = new Set(input.file_ids);
+  const decisionAssetIds = new Set<string>();
+  const knownAssetIds = new Set([...(input.existing_asset_ids ?? [])]);
+
+  if (decision.library_id !== input.library_id) {
+    errors.push(
+      validationError(
+        "BUILD_ASSET_LIBRARY_ID_MISMATCH",
+        `Expected library_id ${input.library_id}, received ${decision.library_id}.`
+      )
+    );
+  }
+
+  for (const asset of decision.asset_cards) {
+    decisionAssetIds.add(asset.asset_id);
+
+    if (asset.library_id !== input.library_id) {
+      errors.push(
+        validationError(
+          "BUILD_ASSET_CARD_LIBRARY_ID_MISMATCH",
+          `Asset ${asset.asset_id} has library_id ${asset.library_id}, expected ${input.library_id}.`,
+          { asset_id: asset.asset_id }
+        )
+      );
+    }
+
+    if (asset.holder_name === "unknown") {
+      errors.push(
+        validationError(
+          "BUILD_ASSET_CARD_HOLDER_UNKNOWN_STRING",
+          `Asset ${asset.asset_id} must use null instead of "unknown" for holder_name.`,
+          { asset_id: asset.asset_id }
+        )
+      );
+    }
+
+    if (asset.issuer_name === "unknown") {
+      errors.push(
+        validationError(
+          "BUILD_ASSET_CARD_ISSUER_UNKNOWN_STRING",
+          `Asset ${asset.asset_id} must use null instead of "unknown" for issuer_name.`,
+          { asset_id: asset.asset_id }
+        )
+      );
+    }
+
+    for (const sourceFile of asset.source_files) {
+      if (!fileIds.has(sourceFile.file_id)) {
+        errors.push(
+          validationError(
+            "BUILD_ASSET_CARD_SOURCE_FILE_UNKNOWN",
+            `Asset ${asset.asset_id} references unknown file_id ${sourceFile.file_id}.`,
+            { asset_id: asset.asset_id, file_id: sourceFile.file_id }
+          )
+        );
+      }
+    }
+  }
+
+  const allAssetIds = new Set([...knownAssetIds, ...decisionAssetIds]);
+  for (const merged of decision.merged_assets) {
+    if (merged.library_id !== input.library_id) {
+      errors.push(
+        validationError(
+          "BUILD_MERGED_ASSET_LIBRARY_ID_MISMATCH",
+          `Merged asset ${merged.merged_asset_id} has library_id ${merged.library_id}, expected ${input.library_id}.`
+        )
+      );
+    }
+
+    if (!allAssetIds.has(merged.canonical_asset_id)) {
+      errors.push(
+        validationError(
+          "BUILD_MERGED_CANONICAL_ASSET_UNKNOWN",
+          `Merged asset ${merged.merged_asset_id} references unknown canonical_asset_id ${merged.canonical_asset_id}.`,
+          { asset_id: merged.canonical_asset_id }
+        )
+      );
+    }
+
+    if (!allAssetIds.has(merged.selected_asset_id)) {
+      errors.push(
+        validationError(
+          "BUILD_MERGED_SELECTED_ASSET_UNKNOWN",
+          `Merged asset ${merged.merged_asset_id} references unknown selected_asset_id ${merged.selected_asset_id}.`,
+          { asset_id: merged.selected_asset_id }
+        )
+      );
+    }
+
+    const supersededIds = new Set<string>();
+    for (const supersededId of merged.superseded_asset_ids) {
+      if (!allAssetIds.has(supersededId)) {
+        errors.push(
+          validationError(
+            "BUILD_MERGED_SUPERSEDED_ASSET_UNKNOWN",
+            `Merged asset ${merged.merged_asset_id} references unknown superseded asset ${supersededId}.`,
+            { asset_id: supersededId }
+          )
+        );
+      }
+      if (supersededIds.has(supersededId)) {
+        errors.push(
+          validationError(
+            "BUILD_MERGED_SUPERSEDED_DUPLICATED",
+            `Merged asset ${merged.merged_asset_id} duplicates superseded asset ${supersededId}.`,
+            { asset_id: supersededId }
+          )
+        );
+      }
+      supersededIds.add(supersededId);
+    }
+
+    if (supersededIds.has(merged.selected_asset_id)) {
+      errors.push(
+        validationError(
+          "BUILD_MERGED_SELECTED_IN_SUPERSEDED",
+          `Merged asset ${merged.merged_asset_id} cannot include selected_asset_id inside superseded_asset_ids.`,
+          { asset_id: merged.selected_asset_id }
+        )
+      );
+    }
+
+    for (const version of merged.version_order) {
+      if (!allAssetIds.has(version.asset_id)) {
+        errors.push(
+          validationError(
+            "BUILD_MERGED_VERSION_ORDER_ASSET_UNKNOWN",
+            `Merged asset ${merged.merged_asset_id} version_order references unknown asset_id ${version.asset_id}.`,
+            { asset_id: version.asset_id }
+          )
+        );
+      }
+    }
+  }
+
+  if (decision.summary.total_assets !== decision.asset_cards.length) {
+    errors.push(
+      validationError(
+        "BUILD_SUMMARY_TOTAL_ASSETS_MISMATCH",
+        `summary.total_assets must equal asset_cards.length (${decision.asset_cards.length}), received ${decision.summary.total_assets}.`
+      )
+    );
+  }
+
+  if (decision.summary.merged_groups !== decision.merged_assets.length) {
+    errors.push(
+      validationError(
+        "BUILD_SUMMARY_MERGED_GROUPS_MISMATCH",
+        `summary.merged_groups must equal merged_assets.length (${decision.merged_assets.length}), received ${decision.summary.merged_groups}.`
+      )
+    );
+  }
+
+  const mergedMemberIds = new Set<string>();
+  for (const merged of decision.merged_assets) {
+    mergedMemberIds.add(merged.selected_asset_id);
+    for (const supersededId of merged.superseded_asset_ids) {
+      mergedMemberIds.add(supersededId);
+    }
+  }
+  const unmergedAssets = decision.asset_cards.filter(
+    (asset) => !mergedMemberIds.has(asset.asset_id)
+  ).length;
+
+  if (decision.summary.unmerged_assets !== unmergedAssets) {
+    errors.push(
+      validationError(
+        "BUILD_SUMMARY_UNMERGED_ASSETS_MISMATCH",
+        `summary.unmerged_assets must equal ${unmergedAssets}, received ${decision.summary.unmerged_assets}.`
+      )
+    );
+  }
+
+  return {
+    status: errors.length > 0 ? "failed" : "passed",
+    errors
+  };
 }
 
 export function validateLifecycleDecision(input: {

@@ -2,6 +2,11 @@ import { basename } from "node:path";
 import { readFile } from "node:fs/promises";
 import AdmZip from "adm-zip";
 import { ParsePipelineError, type PipelineErrorRecord, toPipelineErrorRecord } from "./parse-pipeline-error.js";
+import {
+  fetchWithZhipuRetry,
+  getZhipuHttpRetryConfig,
+  type ZhipuHttpProgressEvent
+} from "./zhipu-http.js";
 
 const createEndpoint = "https://open.bigmodel.cn/api/paas/v4/files/parser/create";
 const resultEndpoint = "https://open.bigmodel.cn/api/paas/v4/files/parser/result";
@@ -131,7 +136,9 @@ async function createTask(input: {
   mimeType: string;
   apiKey: string;
   mode: ZhipuParserMode;
+  onEvent?: (event: ZhipuHttpProgressEvent) => void;
 }): Promise<string> {
+  const retryConfig = getZhipuHttpRetryConfig();
   const form = new FormData();
   form.set(
     "file",
@@ -143,13 +150,23 @@ async function createTask(input: {
 
   let response: Response;
   try {
-    response = await fetch(createEndpoint, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${input.apiKey}`
-      },
-      body: form,
-      signal: AbortSignal.timeout(requestTimeoutMs)
+    response = await fetchWithZhipuRetry({
+      scope: `zhipu-parser:${input.apiKey.slice(-8)}`,
+      url: createEndpoint,
+      timeoutMs: requestTimeoutMs,
+      maxAttempts: retryConfig.maxAttempts,
+      baseDelayMs: retryConfig.baseDelayMs,
+      maxDelayMs: retryConfig.maxDelayMs,
+      minIntervalMs: retryConfig.minIntervalMs,
+      onEvent: input.onEvent,
+      label: `Zhipu parser create (${input.mode})`,
+      init: {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${input.apiKey}`
+        },
+        body: form
+      }
     });
   } catch (error) {
     throw new ParsePipelineError({
@@ -188,16 +205,28 @@ async function pollResult(input: {
   mode: ZhipuParserMode;
   formatType: "text" | "download_link";
   allowEmpty: boolean;
+  onEvent?: (event: ZhipuHttpProgressEvent) => void;
 }): Promise<string | null> {
   for (let attempt = 0; attempt < maxPollAttempts; attempt += 1) {
+    const retryConfig = getZhipuHttpRetryConfig();
     let response: Response;
 
     try {
-      response = await fetch(`${resultEndpoint}/${input.taskId}/${input.formatType}`, {
-        headers: {
-          Authorization: `Bearer ${input.apiKey}`
-        },
-        signal: AbortSignal.timeout(requestTimeoutMs)
+      response = await fetchWithZhipuRetry({
+        scope: `zhipu-parser:${input.apiKey.slice(-8)}`,
+        url: `${resultEndpoint}/${input.taskId}/${input.formatType}`,
+        timeoutMs: requestTimeoutMs,
+        maxAttempts: retryConfig.maxAttempts,
+        baseDelayMs: retryConfig.baseDelayMs,
+        maxDelayMs: retryConfig.maxDelayMs,
+        minIntervalMs: retryConfig.minIntervalMs,
+        onEvent: input.onEvent,
+        label: `Zhipu parser polling (${input.mode})`,
+        init: {
+          headers: {
+            Authorization: `Bearer ${input.apiKey}`
+          }
+        }
       });
     } catch (error) {
       throw new ParsePipelineError({
@@ -290,30 +319,32 @@ async function pollResult(input: {
 async function downloadExportBundle(input: {
   apiKey: string;
   downloadUrl: string;
+  onEvent?: (event: ZhipuHttpProgressEvent) => void;
 }): Promise<{ assets: ParserExportAsset[]; bundleText: string | null }> {
+  const retryConfig = getZhipuHttpRetryConfig();
   let response: Response;
   try {
-    response = await fetch(input.downloadUrl, {
-      headers: {
-        Authorization: `Bearer ${input.apiKey}`
-      },
-      signal: AbortSignal.timeout(requestTimeoutMs)
+    response = await fetchWithZhipuRetry({
+      scope: `zhipu-parser:${input.apiKey.slice(-8)}`,
+      url: input.downloadUrl,
+      timeoutMs: requestTimeoutMs,
+      maxAttempts: retryConfig.maxAttempts,
+      baseDelayMs: retryConfig.baseDelayMs,
+      maxDelayMs: retryConfig.maxDelayMs,
+      minIntervalMs: retryConfig.minIntervalMs,
+      onEvent: input.onEvent,
+      label: "Zhipu parser export download",
+      init: {
+        headers: {
+          Authorization: `Bearer ${input.apiKey}`
+        }
+      }
     });
   } catch (error) {
     throw new ParsePipelineError({
       code: "ZHIPU_PARSER_EXPORT_FAILED",
       message: error instanceof Error ? error.message : "Failed to download parser export bundle",
       retryable: true
-    });
-  }
-
-  if (!response.ok) {
-    const rawText = await readResponseText(response);
-    const payload = parseJsonSafely(rawText);
-    throw new ParsePipelineError({
-      code: "ZHIPU_PARSER_EXPORT_FAILED",
-      message: readMessage(payload, `Failed to download parser export bundle with status ${response.status}`),
-      retryable: response.status >= 500
     });
   }
 
@@ -358,6 +389,7 @@ export async function parseWithZhipuParser(input: {
   fileType: string;
   apiKey: string;
   mode: ZhipuParserMode;
+  onEvent?: (event: ZhipuHttpProgressEvent) => void;
 }): Promise<ZhipuParserResult> {
   const taskId = await createTask({
     filePath: input.filePath,
@@ -365,7 +397,8 @@ export async function parseWithZhipuParser(input: {
     fileType: input.fileType,
     mimeType: input.mimeType,
     apiKey: input.apiKey,
-    mode: input.mode
+    mode: input.mode,
+    onEvent: input.onEvent
   });
 
   if (input.mode === "lite") {
@@ -374,7 +407,8 @@ export async function parseWithZhipuParser(input: {
       apiKey: input.apiKey,
       mode: input.mode,
       formatType: "text",
-      allowEmpty: false
+      allowEmpty: false,
+      onEvent: input.onEvent
     });
 
     return {
@@ -398,7 +432,8 @@ export async function parseWithZhipuParser(input: {
       apiKey: input.apiKey,
       mode: input.mode,
       formatType: "text",
-      allowEmpty: true
+      allowEmpty: true,
+      onEvent: input.onEvent
     });
   } catch (error) {
     branchErrors.push(toPipelineErrorRecord(error));
@@ -410,13 +445,15 @@ export async function parseWithZhipuParser(input: {
       apiKey: input.apiKey,
       mode: input.mode,
       formatType: "download_link",
-      allowEmpty: true
+      allowEmpty: true,
+      onEvent: input.onEvent
     });
 
     if (downloadUrl) {
       const bundle = await downloadExportBundle({
         apiKey: input.apiKey,
-        downloadUrl
+        downloadUrl,
+        onEvent: input.onEvent
       });
       assets = bundle.assets;
       bundleText = bundle.bundleText;

@@ -34,7 +34,10 @@ const assets: AssetCard[] = [
       }
     ],
     confidence: 0.98,
-    normalized_summary: "Transcript"
+    normalized_summary: "Transcript",
+    asset_state: "active",
+    review_status: "auto",
+    last_verified_at: null
   }
 ];
 

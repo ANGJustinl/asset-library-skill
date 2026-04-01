@@ -83,7 +83,10 @@ describe("@caixu/data-mcp", () => {
           }
         ],
         confidence: 0.98,
-        normalized_summary: "Transcript for internship."
+        normalized_summary: "Transcript for internship.",
+        asset_state: "active",
+        review_status: "auto",
+        last_verified_at: null
       }
     ];
 
@@ -99,6 +102,72 @@ describe("@caixu/data-mcp", () => {
     expect(query.data?.asset_cards).toHaveLength(1);
     expect(ruleProfile.data?.profile.bundle_version).toBe("2026.03");
     expect(submissionProfile.data?.profile.profile_id).toBe("judge_demo_v1");
+  });
+
+  it("exposes maintenance tools for overview, patch, archive, restore, and review queue", () => {
+    const service = makeService();
+    const libraryId = service.createOrLoadLibrary({ owner_hint: "demo_student" }).data!
+      .library_id;
+
+    service.upsertAssetCards({
+      library_id: libraryId,
+      asset_cards: [
+        {
+          schema_version: "1.0",
+          library_id: libraryId,
+          asset_id: "asset_resume_001",
+          material_type: "experience",
+          title: "个人简历",
+          holder_name: "Demo Student",
+          issuer_name: null,
+          issue_date: null,
+          expiry_date: null,
+          validity_status: "unknown",
+          reusable_scenarios: [],
+          sensitivity_level: "medium",
+          source_files: [
+            {
+              file_id: "file_resume_001",
+              file_name: "resume.pdf",
+              mime_type: "application/pdf"
+            }
+          ],
+          confidence: 0.62,
+          normalized_summary: "Demo Student 的个人简历。",
+          asset_state: "active",
+          review_status: "needs_review",
+          last_verified_at: null
+        }
+      ]
+    });
+
+    const libraries = service.listLibraries();
+    const overview = service.getLibraryOverview({ library_id: libraryId });
+    const reviewQueue = service.listReviewQueue({ library_id: libraryId });
+    const patched = service.patchAssetCard({
+      library_id: libraryId,
+      asset_id: "asset_resume_001",
+      patch: {
+        normalized_summary: "Demo Student 的个人简历，已人工确认。"
+      }
+    });
+    const archived = service.archiveAsset({
+      library_id: libraryId,
+      asset_id: "asset_resume_001"
+    });
+    const activeQuery = service.queryAssets({ library_id: libraryId });
+    const restored = service.restoreAsset({
+      library_id: libraryId,
+      asset_id: "asset_resume_001"
+    });
+
+    expect(libraries.data?.libraries).toHaveLength(1);
+    expect(overview.data?.counts.needs_review_assets).toBe(1);
+    expect(reviewQueue.data?.asset_cards).toHaveLength(1);
+    expect(patched.data?.asset_card.review_status).toBe("reviewed");
+    expect(archived.data?.asset_card.asset_state).toBe("archived");
+    expect(activeQuery.data?.asset_cards).toHaveLength(0);
+    expect(restored.data?.asset_card.asset_state).toBe("active");
   });
 
   it("fails for unsupported rule profiles", () => {
@@ -153,8 +222,9 @@ describe("@caixu/data-mcp", () => {
       library_id: libraryId,
       goal: "summer_internship_application",
       profile_id: "summer_internship_application",
-      model: "glm-5",
+      model: "glm-4.6",
       input_asset_ids: [],
+      input_file_ids: [],
       input_summary: "Lifecycle audit",
       validation_status: "passed",
       validation_errors: [],
@@ -228,8 +298,9 @@ describe("@caixu/data-mcp", () => {
       library_id: libraryId,
       goal: "summer_internship_application",
       profile_id: "summer_internship_application",
-      model: "glm-5",
+      model: "glm-4.6",
       input_asset_ids: [],
+      input_file_ids: [],
       input_summary: "Package audit",
       validation_status: "passed",
       validation_errors: [],

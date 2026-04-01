@@ -1,4 +1,9 @@
 import { ParsePipelineError } from "./parse-pipeline-error.js";
+import {
+  fetchWithZhipuRetry,
+  getZhipuHttpRetryConfig,
+  type ZhipuHttpProgressEvent
+} from "./zhipu-http.js";
 
 const chatCompletionsEndpoint = "https://open.bigmodel.cn/api/paas/v4/chat/completions";
 const requestTimeoutMs = 120_000;
@@ -94,39 +99,51 @@ export async function runZhipuVlmOcr(input: {
   buffer: Buffer;
   mimeType: string;
   label?: string;
+  onEvent?: (event: ZhipuHttpProgressEvent) => void;
 }): Promise<string> {
+  const retryConfig = getZhipuHttpRetryConfig();
   let response: Response;
 
   try {
-    response = await fetch(chatCompletionsEndpoint, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${input.apiKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: input.model,
-        temperature: 0,
-        messages: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text:
-                  "You are an OCR extractor. Read all visible text in reading order. Preserve line breaks when useful. Return only extracted text. If there is no readable text, return an empty string."
-              },
-              {
-                type: "image_url",
-                image_url: {
-                  url: bufferToDataUrl(input.buffer, input.mimeType)
+    response = await fetchWithZhipuRetry({
+      scope: `zhipu-vlm:${input.model}:${input.apiKey.slice(-8)}`,
+      url: chatCompletionsEndpoint,
+      timeoutMs: requestTimeoutMs,
+      maxAttempts: retryConfig.maxAttempts,
+      baseDelayMs: retryConfig.baseDelayMs,
+      maxDelayMs: retryConfig.maxDelayMs,
+      minIntervalMs: retryConfig.minIntervalMs,
+      onEvent: input.onEvent,
+      label: `Zhipu VLM OCR${input.label ? ` (${input.label})` : ""}`,
+      init: {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${input.apiKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model: input.model,
+          temperature: 0,
+          messages: [
+            {
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text:
+                    "You are an OCR extractor. Read all visible text in reading order. Preserve line breaks when useful. Return only extracted text. If there is no readable text, return an empty string."
+                },
+                {
+                  type: "image_url",
+                  image_url: {
+                    url: bufferToDataUrl(input.buffer, input.mimeType)
+                  }
                 }
-              }
-            ]
-          }
-        ]
-      }),
-      signal: AbortSignal.timeout(requestTimeoutMs)
+              ]
+            }
+          ]
+        })
+      }
     });
   } catch (error) {
     throw new ParsePipelineError({
@@ -138,14 +155,6 @@ export async function runZhipuVlmOcr(input: {
 
   const rawText = await readResponseText(response);
   const payload = parseJsonSafely(rawText);
-
-  if (!response.ok) {
-    throw new ParsePipelineError({
-      code: "VLM_REQUEST_FAILED",
-      message: readMessage(payload, `VLM request failed with status ${response.status}`),
-      retryable: response.status >= 500
-    });
-  }
 
   const content = extractMessageContent(payload);
   if (!content) {

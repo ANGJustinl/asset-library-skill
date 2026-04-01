@@ -12,6 +12,8 @@ export const validityStatusSchema = z.enum([
   "long_term",
   "unknown"
 ]);
+export const assetStateSchema = z.enum(["active", "archived"]);
+export const reviewStatusSchema = z.enum(["auto", "needs_review", "reviewed"]);
 
 export const sourceFileSchema = z.object({
   file_id: z.string().min(1),
@@ -39,14 +41,101 @@ export const parsedFileSchema = z.object({
   ])
 });
 
+export const toolErrorSchema = z.object({
+  code: z.string().min(1),
+  message: z.string().min(1),
+  retryable: z.boolean().optional(),
+  file_id: z.string().nullable().optional(),
+  file_name: z.string().nullable().optional(),
+  asset_id: z.string().nullable().optional()
+});
+
+export const localFileRouteSchema = z.enum([
+  "text",
+  "parser_lite",
+  "parser_export",
+  "ocr",
+  "vlm",
+  "skip"
+]);
+
+export const localFileSchema = z.object({
+  file_id: z.string().min(1),
+  file_name: z.string().min(1),
+  file_path: z.string().min(1),
+  mime_type: z.string().min(1),
+  extension: z.string().min(1),
+  size_bytes: z.number().int().nonnegative(),
+  suggested_route: localFileRouteSchema,
+  skip_reason: z.string().nullable()
+});
+
+export const listLocalFilesDataSchema = z.object({
+  input_root: z.string().min(1),
+  files: z.array(localFileSchema).default([])
+});
+
+export const readLocalTextFileDataSchema = z.object({
+  file: localFileSchema,
+  text: z.string(),
+  text_length: z.number().int().nonnegative()
+});
+
+export const parserExportAssetSchema = z.object({
+  file_name: z.string().min(1),
+  file_path: z.string().min(1),
+  mime_type: z.string().min(1)
+});
+
+export const extractParserTextDataSchema = z.object({
+  file: localFileSchema,
+  mode: z.enum(["lite", "export"]),
+  provider: z.enum([
+    "zhipu_parser_lite",
+    "zhipu_parser_export",
+    "zhipu_ocr",
+    "zhipu_vlm",
+    "hybrid"
+  ]),
+  text: z.string().nullable(),
+  export_assets: z.array(parserExportAssetSchema).default([]),
+  warnings: z.array(toolErrorSchema).default([])
+});
+
+export const renderedPdfPageSchema = z.object({
+  page_number: z.number().int().positive(),
+  file_name: z.string().min(1),
+  file_path: z.string().min(1),
+  mime_type: z.literal("image/png")
+});
+
+export const renderPdfPagesDataSchema = z.object({
+  file: localFileSchema,
+  pages: z.array(renderedPdfPageSchema).default([])
+});
+
+export const visualTextOutputSchema = z.object({
+  file_name: z.string().min(1),
+  file_path: z.string().min(1),
+  mime_type: z.string().min(1),
+  text: z.string().nullable()
+});
+
+export const extractVisualTextDataSchema = z.object({
+  engine: z.enum(["ocr", "vlm"]),
+  provider: z.enum(["zhipu_ocr", "zhipu_vlm"]),
+  outputs: z.array(visualTextOutputSchema).default([]),
+  warnings: z.array(toolErrorSchema).default([])
+});
+
 export const assetCardSchema = z.object({
   schema_version: z.literal(schemaVersion),
   library_id: z.string().min(1),
   asset_id: z.string().min(1),
   material_type: z.string().min(1),
   title: z.string().min(1),
-  holder_name: z.string().min(1),
-  issuer_name: z.string().min(1),
+  holder_name: z.string().min(1).nullable(),
+  issuer_name: z.string().min(1).nullable(),
   issue_date: z.string().nullable(),
   expiry_date: z.string().nullable(),
   validity_status: validityStatusSchema,
@@ -54,7 +143,10 @@ export const assetCardSchema = z.object({
   sensitivity_level: z.enum(["low", "medium", "high"]),
   source_files: z.array(sourceFileSchema).min(1),
   confidence: z.number().min(0).max(1),
-  normalized_summary: z.string().min(1)
+  normalized_summary: z.string().min(1),
+  asset_state: assetStateSchema,
+  review_status: reviewStatusSchema,
+  last_verified_at: z.string().nullable()
 });
 
 export const mergedAssetVersionSchema = z.object({
@@ -188,20 +280,54 @@ export const executionLogSchema = z.object({
   failure_reason: z.string().nullable()
 });
 
-export const toolErrorSchema = z.object({
-  code: z.string().min(1),
+export const pipelineRunCountsSchema = z.object({
+  parsed: z.number().int().nonnegative().default(0),
+  failed: z.number().int().nonnegative().default(0),
+  warnings: z.number().int().nonnegative().default(0),
+  skipped: z.number().int().nonnegative().default(0),
+  assets: z.number().int().nonnegative().default(0),
+  merged: z.number().int().nonnegative().default(0)
+});
+
+export const pipelineRunSchema = z.object({
+  run_id: z.string().min(1),
+  library_id: z.string().min(1),
+  run_type: z.enum(["ingest", "build_asset_library"]),
+  status: z.enum(["running", "completed", "partial", "failed"]),
+  goal: z.string().nullable(),
+  input_root: z.string().nullable(),
+  counts: pipelineRunCountsSchema,
+  latest_stage: z.string().min(1),
+  created_at: z.string().min(1),
+  updated_at: z.string().min(1)
+});
+
+export const pipelineStepSchema = z.object({
+  step_id: z.string().min(1),
+  run_id: z.string().min(1),
+  stage: z.string().min(1),
+  status: z.enum(["running", "completed", "partial", "failed", "skipped"]),
+  tool_name: z.string().nullable(),
   message: z.string().min(1),
-  retryable: z.boolean().optional(),
-  file_id: z.string().nullable().optional(),
-  asset_id: z.string().nullable().optional()
+  payload_json: z.unknown(),
+  created_at: z.string().min(1)
+});
+
+export const pipelineRunDataSchema = z.object({
+  pipeline_run: pipelineRunSchema.nullable(),
+  steps: z.array(pipelineStepSchema).default([])
 });
 
 export const parseMaterialsDataSchema = z.object({
   file_ids: z.array(z.string().min(1)),
   parsed_count: z.number().int().nonnegative(),
   failed_count: z.number().int().nonnegative(),
+  warning_count: z.number().int().nonnegative(),
+  skipped_count: z.number().int().nonnegative(),
   parsed_files: z.array(parsedFileSchema).default([]),
-  failed_files: z.array(toolErrorSchema).default([])
+  failed_files: z.array(toolErrorSchema).default([]),
+  warning_files: z.array(toolErrorSchema).default([]),
+  skipped_files: z.array(toolErrorSchema).default([])
 });
 
 export const buildAssetLibraryDataSchema = z.object({
@@ -220,6 +346,49 @@ export const queryAssetsDataSchema = z.object({
   library_id: z.string().min(1),
   asset_cards: z.array(assetCardSchema).default([]),
   merged_assets: z.array(mergedAssetSchema).default([])
+});
+
+export const libraryOverviewSchema = z.object({
+  library_id: z.string().min(1),
+  owner_hint: z.string().nullable(),
+  created_at: z.string().min(1),
+  updated_at: z.string().min(1),
+  last_ingest_at: z.string().nullable(),
+  last_build_at: z.string().nullable(),
+  counts: z.object({
+    assets_total: z.number().int().nonnegative(),
+    active_assets: z.number().int().nonnegative(),
+    archived_assets: z.number().int().nonnegative(),
+    needs_review_assets: z.number().int().nonnegative(),
+    reviewed_assets: z.number().int().nonnegative(),
+    auto_assets: z.number().int().nonnegative(),
+    material_type_counts: z.record(z.string(), z.number().int().nonnegative())
+  })
+});
+
+export const listLibrariesDataSchema = z.object({
+  libraries: z.array(libraryOverviewSchema).default([])
+});
+
+export const assetChangeEventSchema = z.object({
+  event_id: z.string().min(1),
+  library_id: z.string().min(1),
+  asset_id: z.string().min(1),
+  action: z.enum(["patch", "archive", "restore"]),
+  changed_fields: z.array(z.string().min(1)).default([]),
+  payload_json: z.unknown(),
+  created_at: z.string().min(1)
+});
+
+export const patchAssetCardDataSchema = z.object({
+  library_id: z.string().min(1),
+  asset_card: assetCardSchema,
+  change_event: assetChangeEventSchema
+});
+
+export const reviewQueueDataSchema = z.object({
+  library_id: z.string().min(1),
+  asset_cards: z.array(assetCardSchema).default([])
 });
 
 export const checkLifecycleDataSchema = z.object({
@@ -307,18 +476,19 @@ export const ruleProfileBundleSchema = ruleProfileSchema;
 
 export const agentDecisionAuditSchema = z.object({
   decision_id: z.string().min(1),
-  stage: z.enum(["check_lifecycle", "build_package"]),
+  stage: z.enum(["build_asset_library", "check_lifecycle", "build_package"]),
   library_id: z.string().min(1),
   goal: z.string().min(1),
   profile_id: z.string().min(1),
   model: z.string().min(1),
   input_asset_ids: z.array(z.string().min(1)).default([]),
+  input_file_ids: z.array(z.string().min(1)).default([]),
   input_summary: z.string().min(1),
   validation_status: validationStatusSchema,
   validation_errors: z.array(toolErrorSchema).default([]),
   result_hash: z.string().min(1),
   created_at: z.string().min(1),
-  run_ref_type: z.enum(["lifecycle_run", "package_run"]).optional(),
+  run_ref_type: z.enum(["asset_library_build", "lifecycle_run", "package_run"]).optional(),
   run_ref_id: z.string().min(1).optional()
 });
 
@@ -335,6 +505,16 @@ export const toolResultSchema = <T extends z.ZodTypeAny>(dataSchema: T) =>
 
 export type SourceFile = z.infer<typeof sourceFileSchema>;
 export type ParsedFile = z.infer<typeof parsedFileSchema>;
+export type LocalFileRoute = z.infer<typeof localFileRouteSchema>;
+export type LocalFile = z.infer<typeof localFileSchema>;
+export type ListLocalFilesData = z.infer<typeof listLocalFilesDataSchema>;
+export type ReadLocalTextFileData = z.infer<typeof readLocalTextFileDataSchema>;
+export type ParserExportAsset = z.infer<typeof parserExportAssetSchema>;
+export type ExtractParserTextData = z.infer<typeof extractParserTextDataSchema>;
+export type RenderedPdfPage = z.infer<typeof renderedPdfPageSchema>;
+export type RenderPdfPagesData = z.infer<typeof renderPdfPagesDataSchema>;
+export type VisualTextOutput = z.infer<typeof visualTextOutputSchema>;
+export type ExtractVisualTextData = z.infer<typeof extractVisualTextDataSchema>;
 export type AssetCard = z.infer<typeof assetCardSchema>;
 export type MergedAsset = z.infer<typeof mergedAssetSchema>;
 export type LifecycleEvent = z.infer<typeof lifecycleEventSchema>;
@@ -346,9 +526,19 @@ export type PackagePlan = z.infer<typeof packagePlanSchema>;
 export type GeneratedFile = z.infer<typeof generatedFileSchema>;
 export type ExecutionLog = z.infer<typeof executionLogSchema>;
 export type ToolError = z.infer<typeof toolErrorSchema>;
+export type PipelineRunCounts = z.infer<typeof pipelineRunCountsSchema>;
+export type PipelineRun = z.infer<typeof pipelineRunSchema>;
+export type PipelineStep = z.infer<typeof pipelineStepSchema>;
+export type PipelineRunData = z.infer<typeof pipelineRunDataSchema>;
 export type ParseMaterialsData = z.infer<typeof parseMaterialsDataSchema>;
 export type BuildAssetLibraryData = z.infer<typeof buildAssetLibraryDataSchema>;
+export type BuildAssetLibraryDecision = BuildAssetLibraryData;
 export type QueryAssetsData = z.infer<typeof queryAssetsDataSchema>;
+export type LibraryOverview = z.infer<typeof libraryOverviewSchema>;
+export type ListLibrariesData = z.infer<typeof listLibrariesDataSchema>;
+export type AssetChangeEvent = z.infer<typeof assetChangeEventSchema>;
+export type PatchAssetCardData = z.infer<typeof patchAssetCardDataSchema>;
+export type ReviewQueueData = z.infer<typeof reviewQueueDataSchema>;
 export type CheckLifecycleData = z.infer<typeof checkLifecycleDataSchema>;
 export type ExportLedgersData = z.infer<typeof exportLedgersDataSchema>;
 export type BuildPackageData = z.infer<typeof buildPackageDataSchema>;
@@ -362,6 +552,8 @@ export type SubmissionProfile = z.infer<typeof submissionProfileSchema>;
 export type RuleRequirement = z.infer<typeof ruleRequirementSchema>;
 export type AgentDecisionAudit = z.infer<typeof agentDecisionAuditSchema>;
 export type ValidationStatus = z.infer<typeof validationStatusSchema>;
+export type AssetState = z.infer<typeof assetStateSchema>;
+export type ReviewStatus = z.infer<typeof reviewStatusSchema>;
 export type ToolResult<T> = {
   status: z.infer<typeof toolStatusSchema>;
   trace_id: string;

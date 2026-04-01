@@ -1,15 +1,24 @@
 ---
 name: caixu-query-assets
-description: Use when the user wants to search or filter an existing 材序 asset library. This skill queries caixu-data-mcp by library_id, material type, keyword, scenario, or validity status, and returns the stored asset cards and merged groups without re-running model extraction.
+description: Use when the user wants to search or filter an existing 材序 asset library by library_id, material type, keyword, reusable scenario, or validity status. This skill normalizes filters into canonical values, runs deterministic queries through caixu-data-mcp, and returns stored asset cards and merge groups without re-running extraction or agent judgment.
 ---
 
 # query-assets
 
-Use this skill when the user says things like:
+在用户要“查我有哪些材料”“看哪些可复用”“按类型筛资产”时使用这个 skill。
 
-- “查一下我有哪些可复用材料”
-- “按类型看看资产库”
-- “找一下跟实习相关的证明”
+## Quick flow
+
+1. 归一化查询条件
+2. 调用 `query_assets`
+3. 返回结构化结果或推荐先建库
+
+## Read next only when needed
+
+- 需要映射中文类别、场景或有效期状态时，读 [references/workflow.md](references/workflow.md)
+- 需要确认 `QueryAssetsData` 字段或 tool 边界时，读 [references/tool-contracts.md](references/tool-contracts.md)
+- 需要对齐 filter 归一化输出时，读 [references/output-patterns.md](references/output-patterns.md)
+- 遇到空库、空结果、SQLite 不可用时，读 [references/failure-modes.md](references/failure-modes.md)
 
 ## Required tools
 
@@ -18,50 +27,22 @@ Use this skill when the user says things like:
 ## Required input
 
 - `library_id`
-- optional filters: `material_types[]`, `keyword`, `reusable_scenario`, `validity_statuses[]`
-
-## Preconditions
-
-- The library must have completed at least one successful `build-asset-library` run.
-- If the library only contains parsed files and no stored assets, stop and recommend `build-asset-library` instead of returning a misleading empty success.
-
-## Canonical filter normalization
-
-- `material_types` only allow: `proof`, `experience`, `rights`, `finance`, `agreement`
-- Chinese category mapping:
-  - `证明类` -> `proof`
-  - `经历类` -> `experience`
-  - `权益类` -> `rights`
-  - `财务类` -> `finance`
-  - `协议类` -> `agreement`
-- `validity_statuses` only allow: `valid`, `expiring`, `expired`, `long_term`, `unknown`
-- Common status mapping:
-  - `有效` -> `valid`
-  - `快过期` -> `expiring`
-  - `已过期` -> `expired`
-  - `长期有效` -> `long_term`
-  - `未知` -> `unknown`
-- `reusable_scenario` should use canonical ids such as `summer_internship_application`
-- Common scenario mapping:
-  - `实习申请` -> `summer_internship_application`
+- `material_types[]?`
+- `keyword?`
+- `reusable_scenario?`
+- `validity_statuses[]?`
 
 ## Workflow
 
-1. Require an active `library_id`.
-2. Translate user intent into structured filters:
-   - `material_types`
-   - `keyword`
-   - `reusable_scenario`
-   - `validity_statuses`
-3. If the user gives no filter at all, default to a safe bounded query rather than dumping an unbounded library view.
-4. Call `query_assets`.
-5. Return the `ToolResult<QueryAssetsData>` from the tool directly.
+1. 要求一个明确的 `library_id`，不要猜测库。
+2. 把用户表达归一化成 canonical filters。
+3. 如果用户完全没给过滤条件，做一个安全的有界查询，不要无界倾倒全库。
+4. 调用 `query_assets` 并直接返回 `ToolResult<QueryAssetsData>`。
+5. 如果库还没有 `asset_card`，停止并推荐 `build-asset-library`。
 
 ## Guardrails
 
-- This is a database query skill, not a model extraction skill.
-- If `library_id` is missing, fail fast with a structured error instead of guessing.
-- Do not infer missing assets that are not in storage.
-- If SQLite or the local library is unavailable, surface a structured error instead of converting it into an empty result.
-- When no records match, return `status = "success"` with empty arrays, not a fake error.
-- Treat `merged_assets` as groups associated with matched assets only; do not present unrelated library-wide merge groups as query hits.
+- 这是 DB 查询 skill，不重新抽取材料，不做 agent 判断。
+- 不得把“没有命中”包装成假错误。
+- 不得把 SQLite 错误伪装成空结果。
+- `merged_assets` 只能跟随命中的资产返回，不要把无关归并组混进结果。

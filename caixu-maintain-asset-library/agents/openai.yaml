@@ -1,0 +1,4 @@
+interface:
+  display_name: "Caixu Library Maintenance"
+  short_description: "Review, patch, archive, restore, and verify personal asset library records"
+  default_prompt: "Use $caixu-maintain-asset-library to inspect a library overview, review questionable assets, patch one asset at a time, archive or restore records, and confirm the query results after each maintenance action."

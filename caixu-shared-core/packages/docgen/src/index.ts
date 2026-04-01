@@ -29,7 +29,11 @@ export type BuildPackageArgs = {
   output_dir: string;
   assets: AssetCard[];
   parsed_files?: ParsedFile[];
+  package_id?: string;
+  package_name?: string;
   selected_asset_ids?: string[];
+  selected_exports?: string[];
+  generated_files?: GeneratedFile[];
   readiness: Readiness;
   missing_items_ref: string;
   submission_profile: string;
@@ -188,12 +192,16 @@ export async function buildPackage(args: BuildPackageArgs): Promise<BuildPackage
     );
   }
 
-  const packageId = `pkg_${args.goal}_${new Date().toISOString().slice(0, 10).replaceAll("-", "")}`;
-  const packageBaseName = `${packageName(args.goal)}-package`;
+  const packageId =
+    args.package_id ??
+    `pkg_${args.goal}_${new Date().toISOString().slice(0, 10).replaceAll("-", "")}`;
+  const packageBaseName = args.package_name ?? `${packageName(args.goal)}-package`;
   const zipPath = join(args.output_dir, `${packageBaseName}.zip`);
   const manifestPath = join(args.output_dir, `${packageBaseName}.manifest.json`);
 
-  const selectedExports = generatedFiles(args.goal, 60).map((file) => file.file_name);
+  const generatedFilesList = args.generated_files ?? generatedFiles(args.goal, 60);
+  const selectedExports =
+    args.selected_exports ?? generatedFilesList.map((file) => file.file_name);
 
   const manifest = {
     library_id: args.library_id,
@@ -242,7 +250,7 @@ export async function buildPackage(args: BuildPackageArgs): Promise<BuildPackage
     selected_asset_ids: selectedAssets.map((asset) => asset.asset_id),
     selected_exports: selectedExports,
     missing_items_ref: args.missing_items_ref,
-    generated_files: generatedFiles(args.goal, 60),
+    generated_files: generatedFilesList,
     submission_profile: args.submission_profile,
     readiness: args.readiness,
     operator_notes:

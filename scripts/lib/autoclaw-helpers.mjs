@@ -22,13 +22,29 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 export const repoRoot = resolve(__dirname, "../..");
 export const defaultJudgeDemoUrl = "http://127.0.0.1:3000/judge-demo";
 export const defaultParseMode = "auto";
+export const defaultFileBatchSize = "6";
+export const defaultRemoteParseConcurrency = "2";
+export const defaultBuildAssetMaxRetries = "2";
+export const defaultCliProgress = "true";
+export const defaultCliHeartbeatMs = "5000";
+export const defaultAgentModel = "glm-4.6";
+export const defaultAgentTimeoutMs = "60000";
+export const defaultAgentHttpMaxAttempts = "4";
+export const defaultAgentHttpBaseDelayMs = "2000";
+export const defaultAgentHttpMaxDelayMs = "20000";
+export const defaultAgentMinIntervalMs = "1500";
 export const defaultZhipuParserMode = "lite";
 export const defaultZhipuOcrEnabled = "false";
 export const defaultVlmModel = "glm-4.6v";
 export const defaultVlmPdfRenderer = "pdftoppm";
+export const defaultZhipuHttpMaxAttempts = "4";
+export const defaultZhipuHttpBaseDelayMs = "2000";
+export const defaultZhipuHttpMaxDelayMs = "20000";
+export const defaultZhipuMinIntervalMs = "1500";
 export const expectedSkillNames = [
   "ingest-materials",
   "build-asset-library",
+  "maintain-asset-library",
   "query-assets",
   "check-lifecycle",
   "build-package",
@@ -169,10 +185,26 @@ export function shellQuote(value) {
 export function buildEnvFileContent(config) {
   return [
     `export CAIXU_PARSE_MODE=${shellQuote(config.parseMode ?? defaultParseMode)}`,
+    `export CAIXU_FILE_BATCH_SIZE=${shellQuote(config.fileBatchSize ?? defaultFileBatchSize)}`,
+    `export CAIXU_REMOTE_PARSE_CONCURRENCY=${shellQuote(config.remoteParseConcurrency ?? defaultRemoteParseConcurrency)}`,
+    `export CAIXU_BUILD_ASSET_MAX_RETRIES=${shellQuote(config.buildAssetMaxRetries ?? defaultBuildAssetMaxRetries)}`,
+    `export CAIXU_CLI_PROGRESS=${shellQuote(config.cliProgress ?? defaultCliProgress)}`,
+    `export CAIXU_CLI_HEARTBEAT_MS=${shellQuote(config.cliHeartbeatMs ?? defaultCliHeartbeatMs)}`,
+    `export CAIXU_AGENT_MODEL=${shellQuote(config.agentModel ?? defaultAgentModel)}`,
+    `export CAIXU_AGENT_TIMEOUT_MS=${shellQuote(config.agentTimeoutMs ?? defaultAgentTimeoutMs)}`,
+    `export CAIXU_AGENT_HTTP_MAX_ATTEMPTS=${shellQuote(config.agentHttpMaxAttempts ?? defaultAgentHttpMaxAttempts)}`,
+    `export CAIXU_AGENT_HTTP_BASE_DELAY_MS=${shellQuote(config.agentHttpBaseDelayMs ?? defaultAgentHttpBaseDelayMs)}`,
+    `export CAIXU_AGENT_HTTP_MAX_DELAY_MS=${shellQuote(config.agentHttpMaxDelayMs ?? defaultAgentHttpMaxDelayMs)}`,
+    `export CAIXU_AGENT_MIN_INTERVAL_MS=${shellQuote(config.agentMinIntervalMs ?? defaultAgentMinIntervalMs)}`,
+    `export CAIXU_AGENT_API_KEY=${shellQuote(config.agentApiKey ?? "")}`,
     `export CAIXU_ZHIPU_PARSER_MODE=${shellQuote(config.zhipuParserMode ?? defaultZhipuParserMode)}`,
     `export CAIXU_ZHIPU_OCR_ENABLED=${shellQuote(config.zhipuOcrEnabled ?? defaultZhipuOcrEnabled)}`,
     `export CAIXU_VLM_MODEL=${shellQuote(config.vlmModel ?? defaultVlmModel)}`,
     `export CAIXU_VLM_PDF_RENDERER=${shellQuote(config.vlmPdfRenderer ?? defaultVlmPdfRenderer)}`,
+    `export CAIXU_ZHIPU_HTTP_MAX_ATTEMPTS=${shellQuote(config.zhipuHttpMaxAttempts ?? defaultZhipuHttpMaxAttempts)}`,
+    `export CAIXU_ZHIPU_HTTP_BASE_DELAY_MS=${shellQuote(config.zhipuHttpBaseDelayMs ?? defaultZhipuHttpBaseDelayMs)}`,
+    `export CAIXU_ZHIPU_HTTP_MAX_DELAY_MS=${shellQuote(config.zhipuHttpMaxDelayMs ?? defaultZhipuHttpMaxDelayMs)}`,
+    `export CAIXU_ZHIPU_MIN_INTERVAL_MS=${shellQuote(config.zhipuMinIntervalMs ?? defaultZhipuMinIntervalMs)}`,
     `export CAIXU_ZHIPU_PARSER_API_KEY=${shellQuote(config.zhipuParserApiKey ?? "")}`,
     `export CAIXU_ZHIPU_OCR_API_KEY=${shellQuote(config.zhipuOcrApiKey ?? "")}`,
     `export CAIXU_ZHIPU_VLM_API_KEY=${shellQuote(config.zhipuVlmApiKey ?? "")}`,
@@ -232,6 +264,61 @@ export function resolveRuntimeConfig(paths, overrides = {}) {
     process.env.CAIXU_PARSE_MODE ??
     existingEnv.CAIXU_PARSE_MODE ??
     defaultParseMode;
+  const fileBatchSize =
+    overrides.fileBatchSize ??
+    process.env.CAIXU_FILE_BATCH_SIZE ??
+    existingEnv.CAIXU_FILE_BATCH_SIZE ??
+    defaultFileBatchSize;
+  const remoteParseConcurrency =
+    overrides.remoteParseConcurrency ??
+    process.env.CAIXU_REMOTE_PARSE_CONCURRENCY ??
+    existingEnv.CAIXU_REMOTE_PARSE_CONCURRENCY ??
+    defaultRemoteParseConcurrency;
+  const buildAssetMaxRetries =
+    overrides.buildAssetMaxRetries ??
+    process.env.CAIXU_BUILD_ASSET_MAX_RETRIES ??
+    existingEnv.CAIXU_BUILD_ASSET_MAX_RETRIES ??
+    defaultBuildAssetMaxRetries;
+  const cliProgress =
+    overrides.cliProgress ??
+    process.env.CAIXU_CLI_PROGRESS ??
+    existingEnv.CAIXU_CLI_PROGRESS ??
+    defaultCliProgress;
+  const cliHeartbeatMs =
+    overrides.cliHeartbeatMs ??
+    process.env.CAIXU_CLI_HEARTBEAT_MS ??
+    existingEnv.CAIXU_CLI_HEARTBEAT_MS ??
+    defaultCliHeartbeatMs;
+  const agentTimeoutMs =
+    overrides.agentTimeoutMs ??
+    process.env.CAIXU_AGENT_TIMEOUT_MS ??
+    existingEnv.CAIXU_AGENT_TIMEOUT_MS ??
+    defaultAgentTimeoutMs;
+  const agentHttpMaxAttempts =
+    overrides.agentHttpMaxAttempts ??
+    process.env.CAIXU_AGENT_HTTP_MAX_ATTEMPTS ??
+    existingEnv.CAIXU_AGENT_HTTP_MAX_ATTEMPTS ??
+    defaultAgentHttpMaxAttempts;
+  const agentHttpBaseDelayMs =
+    overrides.agentHttpBaseDelayMs ??
+    process.env.CAIXU_AGENT_HTTP_BASE_DELAY_MS ??
+    existingEnv.CAIXU_AGENT_HTTP_BASE_DELAY_MS ??
+    defaultAgentHttpBaseDelayMs;
+  const agentHttpMaxDelayMs =
+    overrides.agentHttpMaxDelayMs ??
+    process.env.CAIXU_AGENT_HTTP_MAX_DELAY_MS ??
+    existingEnv.CAIXU_AGENT_HTTP_MAX_DELAY_MS ??
+    defaultAgentHttpMaxDelayMs;
+  const agentMinIntervalMs =
+    overrides.agentMinIntervalMs ??
+    process.env.CAIXU_AGENT_MIN_INTERVAL_MS ??
+    existingEnv.CAIXU_AGENT_MIN_INTERVAL_MS ??
+    defaultAgentMinIntervalMs;
+  const agentModel =
+    overrides.agentModel ??
+    process.env.CAIXU_AGENT_MODEL ??
+    existingEnv.CAIXU_AGENT_MODEL ??
+    defaultAgentModel;
   const zhipuParserMode =
     overrides.zhipuParserMode ??
     process.env.CAIXU_ZHIPU_PARSER_MODE ??
@@ -252,11 +339,36 @@ export function resolveRuntimeConfig(paths, overrides = {}) {
     process.env.CAIXU_VLM_PDF_RENDERER ??
     existingEnv.CAIXU_VLM_PDF_RENDERER ??
     defaultVlmPdfRenderer;
+  const zhipuHttpMaxAttempts =
+    overrides.zhipuHttpMaxAttempts ??
+    process.env.CAIXU_ZHIPU_HTTP_MAX_ATTEMPTS ??
+    existingEnv.CAIXU_ZHIPU_HTTP_MAX_ATTEMPTS ??
+    defaultZhipuHttpMaxAttempts;
+  const zhipuHttpBaseDelayMs =
+    overrides.zhipuHttpBaseDelayMs ??
+    process.env.CAIXU_ZHIPU_HTTP_BASE_DELAY_MS ??
+    existingEnv.CAIXU_ZHIPU_HTTP_BASE_DELAY_MS ??
+    defaultZhipuHttpBaseDelayMs;
+  const zhipuHttpMaxDelayMs =
+    overrides.zhipuHttpMaxDelayMs ??
+    process.env.CAIXU_ZHIPU_HTTP_MAX_DELAY_MS ??
+    existingEnv.CAIXU_ZHIPU_HTTP_MAX_DELAY_MS ??
+    defaultZhipuHttpMaxDelayMs;
+  const zhipuMinIntervalMs =
+    overrides.zhipuMinIntervalMs ??
+    process.env.CAIXU_ZHIPU_MIN_INTERVAL_MS ??
+    existingEnv.CAIXU_ZHIPU_MIN_INTERVAL_MS ??
+    defaultZhipuMinIntervalMs;
   const zhipuApiKey =
     overrides.zhipuApiKey ??
     process.env.ZHIPU_API_KEY ??
     existingEnv.ZHIPU_API_KEY ??
     "";
+  const agentApiKey =
+    overrides.agentApiKey ??
+    process.env.CAIXU_AGENT_API_KEY ??
+    existingEnv.CAIXU_AGENT_API_KEY ??
+    zhipuApiKey;
   const zhipuParserApiKey =
     overrides.zhipuParserApiKey ??
     process.env.CAIXU_ZHIPU_PARSER_API_KEY ??
@@ -285,10 +397,26 @@ export function resolveRuntimeConfig(paths, overrides = {}) {
 
   return {
     parseMode,
+    fileBatchSize,
+    remoteParseConcurrency,
+    buildAssetMaxRetries,
+    cliProgress,
+    cliHeartbeatMs,
+    agentModel,
+    agentTimeoutMs,
+    agentHttpMaxAttempts,
+    agentHttpBaseDelayMs,
+    agentHttpMaxDelayMs,
+    agentMinIntervalMs,
+    agentApiKey,
     zhipuParserMode,
     zhipuOcrEnabled,
     vlmModel,
     vlmPdfRenderer,
+    zhipuHttpMaxAttempts,
+    zhipuHttpBaseDelayMs,
+    zhipuHttpMaxDelayMs,
+    zhipuMinIntervalMs,
     zhipuParserApiKey,
     zhipuOcrApiKey,
     zhipuVlmApiKey,
@@ -599,10 +727,26 @@ export function writeJson(pathname, value) {
 export function summarizeRuntimeConfig(runtimeConfig) {
   return {
     parse_mode: runtimeConfig.parseMode,
+    file_batch_size: runtimeConfig.fileBatchSize,
+    remote_parse_concurrency: runtimeConfig.remoteParseConcurrency,
+    build_asset_max_retries: runtimeConfig.buildAssetMaxRetries,
+    cli_progress: runtimeConfig.cliProgress,
+    cli_heartbeat_ms: runtimeConfig.cliHeartbeatMs,
+    agent_model: runtimeConfig.agentModel,
+    agent_timeout_ms: runtimeConfig.agentTimeoutMs,
+    agent_http_max_attempts: runtimeConfig.agentHttpMaxAttempts,
+    agent_http_base_delay_ms: runtimeConfig.agentHttpBaseDelayMs,
+    agent_http_max_delay_ms: runtimeConfig.agentHttpMaxDelayMs,
+    agent_min_interval_ms: runtimeConfig.agentMinIntervalMs,
+    agent_api_key: maskSecret(runtimeConfig.agentApiKey),
     zhipu_parser_mode: runtimeConfig.zhipuParserMode,
     zhipu_ocr_enabled: runtimeConfig.zhipuOcrEnabled,
     vlm_model: runtimeConfig.vlmModel,
     vlm_pdf_renderer: runtimeConfig.vlmPdfRenderer,
+    zhipu_http_max_attempts: runtimeConfig.zhipuHttpMaxAttempts,
+    zhipu_http_base_delay_ms: runtimeConfig.zhipuHttpBaseDelayMs,
+    zhipu_http_max_delay_ms: runtimeConfig.zhipuHttpMaxDelayMs,
+    zhipu_min_interval_ms: runtimeConfig.zhipuMinIntervalMs,
     zhipu_parser_api_key: maskSecret(runtimeConfig.zhipuParserApiKey),
     zhipu_ocr_api_key: maskSecret(runtimeConfig.zhipuOcrApiKey),
     zhipu_vlm_api_key: maskSecret(runtimeConfig.zhipuVlmApiKey),
@@ -792,6 +936,17 @@ export async function runDoctorSuite(paths, runtimeConfig) {
     );
   }
 
+  if (!runtimeConfig.agentApiKey) {
+    issues.push(
+      buildIssue(
+        "warning",
+        "AGENT_API_KEY_MISSING",
+        "No CAIXU_AGENT_API_KEY is configured. build-asset-library, check-lifecycle, and build-package cannot run in live mode.",
+        "Set CAIXU_AGENT_API_KEY in caixu.env. If you only have one compatible key, you can also fallback to ZHIPU_API_KEY."
+      )
+    );
+  }
+
   const configuredPdfRenderer = runtimeConfig.vlmPdfRenderer || defaultVlmPdfRenderer;
   const rendererCheck = runProcess(configuredPdfRenderer, ["-h"]);
   if (!rendererCheck.ok) {
@@ -819,8 +974,9 @@ export async function runDoctorSuite(paths, runtimeConfig) {
 
   const smokeResults = {
     create_or_load_library: null,
-    parse_materials_text: null,
-    parse_materials_live_png: null
+    list_local_files: null,
+    read_local_text_file: null,
+    extract_visual_text_live_png: null
   };
 
   const canRunSmoke =
@@ -859,33 +1015,77 @@ export async function runDoctorSuite(paths, runtimeConfig) {
 
     const textFixtureExists = fileExists(paths.fixtureTranscriptPath);
     if (textFixtureExists) {
-      const ocrTextSmoke = runProcess(
+      const listTextSmoke = runProcess(
         "mcporter",
         [
           "call",
-          "caixu-ocr-mcp.parse_materials",
+          "caixu-ocr-mcp.list_local_files",
           "--args",
-          JSON.stringify({ file_paths: [paths.fixtureTranscriptPath] }),
+          JSON.stringify({ input_root: path.dirname(paths.fixtureTranscriptPath) }),
           "--output",
           "json"
         ],
         { homeRoot: paths.homeRoot }
       );
-      smokeResults.parse_materials_text = {
-        ok: ocrTextSmoke.ok,
-        status: ocrTextSmoke.status,
-        response: safeJsonParse(ocrTextSmoke.stdout, null),
-        stderr: ocrTextSmoke.stderr.trim()
+      const listed = safeJsonParse(listTextSmoke.stdout, null);
+      smokeResults.list_local_files = {
+        ok: listTextSmoke.ok,
+        status: listTextSmoke.status,
+        response: listed,
+        stderr: listTextSmoke.stderr.trim()
       };
-      if (!ocrTextSmoke.ok) {
+      if (!listTextSmoke.ok) {
         issues.push(
           buildIssue(
             "error",
-            "OCR_MCP_TEXT_SMOKE_FAILED",
-            "mcporter call caixu-ocr-mcp.parse_materials failed on transcript.txt.",
-            "Inspect the OCR MCP registration and local fixture path."
+            "OCR_MCP_LIST_LOCAL_FILES_SMOKE_FAILED",
+            "mcporter call caixu-ocr-mcp.list_local_files failed on the transcript fixture directory.",
+            "Inspect the OCR MCP registration and local fixture directory path."
           )
         );
+      } else {
+        const transcriptFile = listed?.data?.files?.find(
+          (file) => file.file_path === paths.fixtureTranscriptPath
+        );
+        if (!transcriptFile) {
+          issues.push(
+            buildIssue(
+              "error",
+              "OCR_MCP_LIST_LOCAL_FILES_MISSING_FIXTURE",
+              "list_local_files did not return the transcript fixture.",
+              "Inspect the fixture path and local file listing logic."
+            )
+          );
+        } else {
+          const readTextSmoke = runProcess(
+            "mcporter",
+            [
+              "call",
+              "caixu-ocr-mcp.read_local_text_file",
+              "--args",
+              JSON.stringify({ file: transcriptFile }),
+              "--output",
+              "json"
+            ],
+            { homeRoot: paths.homeRoot }
+          );
+          smokeResults.read_local_text_file = {
+            ok: readTextSmoke.ok,
+            status: readTextSmoke.status,
+            response: safeJsonParse(readTextSmoke.stdout, null),
+            stderr: readTextSmoke.stderr.trim()
+          };
+          if (!readTextSmoke.ok) {
+            issues.push(
+              buildIssue(
+                "error",
+                "OCR_MCP_READ_TEXT_SMOKE_FAILED",
+                "mcporter call caixu-ocr-mcp.read_local_text_file failed on transcript.txt.",
+                "Inspect the OCR MCP registration and local text read logic."
+              )
+            );
+          }
+        }
       }
     } else {
       issues.push(
@@ -903,15 +1103,24 @@ export async function runDoctorSuite(paths, runtimeConfig) {
         "mcporter",
         [
           "call",
-          "caixu-ocr-mcp.parse_materials",
+          "caixu-ocr-mcp.extract_visual_text",
           "--args",
-          JSON.stringify({ file_paths: [paths.fixturePngPath] }),
+          JSON.stringify({
+            engine: runtimeConfig.zhipuOcrEnabled === "false" ? "vlm" : "ocr",
+            items: [
+              {
+                file_name: path.basename(paths.fixturePngPath),
+                file_path: paths.fixturePngPath,
+                mime_type: "image/png"
+              }
+            ]
+          }),
           "--output",
           "json"
         ],
         { homeRoot: paths.homeRoot }
       );
-      smokeResults.parse_materials_live_png = {
+      smokeResults.extract_visual_text_live_png = {
         ok: liveSmoke.ok,
         status: liveSmoke.status,
         response: safeJsonParse(liveSmoke.stdout, null),
@@ -922,8 +1131,8 @@ export async function runDoctorSuite(paths, runtimeConfig) {
           buildIssue(
             "warning",
             "OCR_MCP_LIVE_SMOKE_FAILED",
-            "Live OCR smoke on fixtures/materials/ocr-smoke.png failed.",
-            "Check ZHIPU_API_KEY, network access, and the OCR MCP remote parser/OCR pipeline."
+            "Live extract_visual_text smoke on fixtures/materials/ocr-smoke.png failed.",
+            "Check ZHIPU API keys, network access, and the OCR MCP remote OCR/VLM pipeline."
           )
         );
       }

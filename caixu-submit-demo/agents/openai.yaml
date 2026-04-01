@@ -1,0 +1,4 @@
+interface:
+  display_name: "Caixu Submit"
+  short_description: "Submit a saved package plan to the judge demo page with structured logging"
+  default_prompt: "Use $caixu-submit-demo to load the package plan and submission profile, preflight readiness and zip paths, use AutoClaw or OpenClaw for browser submission, and always write a structured execution_log."

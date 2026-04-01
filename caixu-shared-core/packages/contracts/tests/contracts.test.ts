@@ -18,7 +18,7 @@ describe("@caixu/contracts", () => {
       material_type: "proof",
       title: "Transcript",
       holder_name: "Demo Student",
-      issuer_name: "Demo University",
+      issuer_name: null,
       issue_date: "2026-03-01",
       expiry_date: null,
       validity_status: "long_term",
@@ -32,7 +32,10 @@ describe("@caixu/contracts", () => {
         }
       ],
       confidence: 0.98,
-      normalized_summary: "Transcript for internship applications."
+      normalized_summary: "Transcript for internship applications.",
+      asset_state: "active",
+      review_status: "auto",
+      last_verified_at: null
     });
 
     expect(parsed.asset_id).toBe("asset_transcript_001");
@@ -63,6 +66,8 @@ describe("@caixu/contracts", () => {
       file_ids: ["file_001", "file_002"],
       parsed_count: 2,
       failed_count: 0,
+      warning_count: 1,
+      skipped_count: 1,
       parsed_files: [
         {
           file_id: "file_001",
@@ -87,7 +92,25 @@ describe("@caixu/contracts", () => {
           provider: "zhipu_parser_lite"
         }
       ],
-      failed_files: []
+      failed_files: [],
+      warning_files: [
+        {
+          code: "ZHIPU_PARSER_EMPTY_CONTENT",
+          message: "Parser branch returned empty text content.",
+          retryable: false,
+          file_id: "file_002",
+          file_name: "id-card.pdf"
+        }
+      ],
+      skipped_files: [
+        {
+          code: "UNSUPPORTED_FILE_SKIPPED",
+          message: "Skipped archive.zip: unsupported_zip_for_ingestion",
+          retryable: false,
+          file_id: "file_003",
+          file_name: "archive.zip"
+        }
+      ]
     });
 
     expect(parsed.parsed_files[1]?.provider).toBe("zhipu_parser_lite");
@@ -129,8 +152,9 @@ describe("@caixu/contracts", () => {
       library_id: "lib_demo_student_001",
       goal: "summer_internship_application",
       profile_id: "summer_internship_application",
-      model: "glm-5",
+      model: "glm-4.6",
       input_asset_ids: ["asset_transcript_001"],
+      input_file_ids: ["file_transcript_001"],
       input_summary: "One transcript asset.",
       validation_status: "passed",
       validation_errors: [],

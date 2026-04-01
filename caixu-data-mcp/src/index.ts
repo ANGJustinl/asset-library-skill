@@ -4,14 +4,24 @@ import { z } from "zod";
 import {
   agentDecisionAuditSchema,
   assetCardSchema,
+  assetChangeEventSchema,
+  assetStateSchema,
   checkLifecycleDataSchema,
   executionLogSchema,
   lifecycleRunDataSchema,
+  libraryOverviewSchema,
+  listLibrariesDataSchema,
   mergedAssetSchema,
+  patchAssetCardDataSchema,
   packageRunDataSchema,
   packagePlanSchema,
+  pipelineRunCountsSchema,
+  pipelineRunDataSchema,
+  pipelineStepSchema,
   parsedFileSchema,
   queryAssetsDataSchema,
+  reviewQueueDataSchema,
+  reviewStatusSchema,
   ruleProfileSchema,
   submissionProfileSchema,
   toolResultSchema
@@ -41,6 +51,149 @@ server.registerTool(
   },
   async ({ library_id, owner_hint }) => {
     const result = service.createOrLoadLibrary({ library_id, owner_hint });
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      structuredContent: result
+    };
+  }
+);
+
+server.registerTool(
+  "list_libraries",
+  {
+    description: "List local libraries with maintenance-focused overview counts.",
+    inputSchema: {},
+    outputSchema: toolResultSchema(listLibrariesDataSchema).shape
+  },
+  async () => {
+    const result = service.listLibraries();
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      structuredContent: result
+    };
+  }
+);
+
+server.registerTool(
+  "get_library_overview",
+  {
+    description: "Load library-level overview counts, review queue size, and recent ingest/build times.",
+    inputSchema: {
+      library_id: z.string().min(1)
+    },
+    outputSchema: toolResultSchema(libraryOverviewSchema).shape
+  },
+  async ({ library_id }) => {
+    const result = service.getLibraryOverview({ library_id });
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      structuredContent: result
+    };
+  }
+);
+
+server.registerTool(
+  "create_pipeline_run",
+  {
+    description: "Create a persisted ingest or build_asset_library pipeline run.",
+    inputSchema: {
+      run_id: z.string().optional(),
+      library_id: z.string().min(1),
+      run_type: z.enum(["ingest", "build_asset_library"]),
+      goal: z.string().optional(),
+      input_root: z.string().optional(),
+      latest_stage: z.string().optional()
+    },
+    outputSchema: toolResultSchema(pipelineRunDataSchema).shape
+  },
+  async ({ run_id, library_id, run_type, goal, input_root, latest_stage }) => {
+    const result = service.createPipelineRun({
+      run_id,
+      library_id,
+      run_type,
+      goal,
+      input_root,
+      latest_stage
+    });
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      structuredContent: result
+    };
+  }
+);
+
+server.registerTool(
+  "append_pipeline_step",
+  {
+    description: "Append a structured step record to a pipeline run.",
+    inputSchema: {
+      run_id: z.string().min(1),
+      stage: z.string().min(1),
+      status: pipelineStepSchema.shape.status,
+      tool_name: z.string().optional(),
+      message: z.string().min(1),
+      payload_json: z.unknown().optional()
+    },
+    outputSchema: toolResultSchema(
+      z.object({
+        step: pipelineStepSchema
+      })
+    ).shape
+  },
+  async ({ run_id, stage, status, tool_name, message, payload_json }) => {
+    const result = service.appendPipelineStep({
+      run_id,
+      stage,
+      status,
+      tool_name,
+      message,
+      payload_json
+    });
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      structuredContent: result
+    };
+  }
+);
+
+server.registerTool(
+  "get_pipeline_run",
+  {
+    description: "Load a pipeline run and its recent steps.",
+    inputSchema: {
+      run_id: z.string().min(1),
+      step_limit: z.number().int().positive().optional()
+    },
+    outputSchema: toolResultSchema(pipelineRunDataSchema).shape
+  },
+  async ({ run_id, step_limit }) => {
+    const result = service.getPipelineRun({ run_id, step_limit });
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      structuredContent: result
+    };
+  }
+);
+
+server.registerTool(
+  "complete_pipeline_run",
+  {
+    description: "Mark a pipeline run as completed, partial, or failed and persist final counts.",
+    inputSchema: {
+      run_id: z.string().min(1),
+      status: z.enum(["completed", "partial", "failed"]),
+      latest_stage: z.string().min(1),
+      counts: pipelineRunCountsSchema
+    },
+    outputSchema: toolResultSchema(pipelineRunDataSchema).shape
+  },
+  async ({ run_id, status, latest_stage, counts }) => {
+    const result = service.completePipelineRun({
+      run_id,
+      status,
+      latest_stage,
+      counts
+    });
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
       structuredContent: result
@@ -130,12 +283,106 @@ server.registerTool(
       material_types: z.array(z.string().min(1)).optional(),
       keyword: z.string().optional(),
       reusable_scenario: z.string().optional(),
-      validity_statuses: z.array(z.string().min(1)).optional()
+      validity_statuses: z.array(z.string().min(1)).optional(),
+      asset_states: z.array(assetStateSchema).optional(),
+      review_statuses: z.array(reviewStatusSchema).optional()
     },
     outputSchema: toolResultSchema(queryAssetsDataSchema).shape
   },
   async (input) => {
     const result = service.queryAssets(input);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      structuredContent: result
+    };
+  }
+);
+
+server.registerTool(
+  "patch_asset_card",
+  {
+    description: "Patch a single asset card after manual review and persist a change event.",
+    inputSchema: {
+      library_id: z.string().min(1),
+      asset_id: z.string().min(1),
+      patch: z
+        .object({
+          title: z.string().min(1).optional(),
+          holder_name: z.string().min(1).nullable().optional(),
+          issuer_name: z.string().min(1).nullable().optional(),
+          issue_date: z.string().nullable().optional(),
+          expiry_date: z.string().nullable().optional(),
+          validity_status: assetCardSchema.shape.validity_status.optional(),
+          reusable_scenarios: z.array(z.string().min(1)).optional(),
+          sensitivity_level: assetCardSchema.shape.sensitivity_level.optional(),
+          normalized_summary: z.string().min(1).optional(),
+          review_status: reviewStatusSchema.optional(),
+          last_verified_at: z.string().nullable().optional()
+        })
+        .refine((value) => Object.keys(value).length > 0, {
+          message: "patch must contain at least one field"
+        })
+    },
+    outputSchema: toolResultSchema(patchAssetCardDataSchema).shape
+  },
+  async ({ library_id, asset_id, patch }) => {
+    const result = service.patchAssetCard({ library_id, asset_id, patch });
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      structuredContent: result
+    };
+  }
+);
+
+server.registerTool(
+  "archive_asset",
+  {
+    description: "Archive an asset so downstream query/lifecycle/package flows stop consuming it by default.",
+    inputSchema: {
+      library_id: z.string().min(1),
+      asset_id: z.string().min(1)
+    },
+    outputSchema: toolResultSchema(patchAssetCardDataSchema).shape
+  },
+  async ({ library_id, asset_id }) => {
+    const result = service.archiveAsset({ library_id, asset_id });
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      structuredContent: result
+    };
+  }
+);
+
+server.registerTool(
+  "restore_asset",
+  {
+    description: "Restore an archived asset back to active state.",
+    inputSchema: {
+      library_id: z.string().min(1),
+      asset_id: z.string().min(1)
+    },
+    outputSchema: toolResultSchema(patchAssetCardDataSchema).shape
+  },
+  async ({ library_id, asset_id }) => {
+    const result = service.restoreAsset({ library_id, asset_id });
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      structuredContent: result
+    };
+  }
+);
+
+server.registerTool(
+  "list_review_queue",
+  {
+    description: "List active assets that require manual review before being trusted as clean library records.",
+    inputSchema: {
+      library_id: z.string().min(1)
+    },
+    outputSchema: toolResultSchema(reviewQueueDataSchema).shape
+  },
+  async ({ library_id }) => {
+    const result = service.listReviewQueue({ library_id });
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
       structuredContent: result

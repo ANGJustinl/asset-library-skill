@@ -2,12 +2,31 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import {
-  parseMaterialsDataSchema,
+  extractParserTextDataSchema,
+  extractVisualTextDataSchema,
+  listLocalFilesDataSchema,
+  localFileSchema,
+  readLocalTextFileDataSchema,
+  renderPdfPagesDataSchema,
   toolResultSchema
 } from "@caixu/contracts";
-import { parseMaterialPaths } from "./tools/parse-materials.js";
+import { listLocalFilesTool } from "./tools/list-local-files.js";
+import { readLocalTextFileTool } from "./tools/read-local-text-file.js";
+import { extractParserTextTool } from "./tools/extract-parser-text.js";
+import { extractVisualTextTool } from "./tools/extract-visual-text.js";
+import { renderPdfPagesTool } from "./tools/render-pdf-pages.js";
 
-const parseMaterialsOutputSchema = toolResultSchema(parseMaterialsDataSchema);
+const listLocalFilesOutputSchema = toolResultSchema(listLocalFilesDataSchema);
+const readLocalTextFileOutputSchema = toolResultSchema(readLocalTextFileDataSchema);
+const extractParserTextOutputSchema = toolResultSchema(extractParserTextDataSchema);
+const extractVisualTextOutputSchema = toolResultSchema(extractVisualTextDataSchema);
+const renderPdfPagesOutputSchema = toolResultSchema(renderPdfPagesDataSchema);
+
+const visualInputItemSchema = z.object({
+  file_name: z.string().min(1),
+  file_path: z.string().min(1),
+  mime_type: z.string().min(1)
+});
 
 const server = new McpServer({
   name: "caixu-ocr-mcp",
@@ -15,25 +34,97 @@ const server = new McpServer({
 });
 
 server.registerTool(
-  "parse_materials",
+  "list_local_files",
   {
     description:
-      "Parse local material files into normalized parsed file records for downstream asset extraction.",
+      "List local files under an input root and return deterministic local file records with suggested routes.",
     inputSchema: {
-      file_paths: z.array(z.string().min(1)).min(1),
-      goal: z.string().min(1).optional()
+      input_root: z.string().min(1)
     },
-    outputSchema: parseMaterialsOutputSchema.shape
+    outputSchema: listLocalFilesOutputSchema.shape
   },
-  async ({ file_paths, goal }) => {
-    const result = await parseMaterialPaths({ file_paths, goal });
+  async ({ input_root }) => {
+    const result = await listLocalFilesTool({ input_root });
     return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(result, null, 2)
-        }
-      ],
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      structuredContent: result
+    };
+  }
+);
+
+server.registerTool(
+  "read_local_text_file",
+  {
+    description: "Read a local text-like file into raw UTF-8 text.",
+    inputSchema: {
+      file: localFileSchema
+    },
+    outputSchema: readLocalTextFileOutputSchema.shape
+  },
+  async ({ file }) => {
+    const result = await readLocalTextFileTool({ file });
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      structuredContent: result
+    };
+  }
+);
+
+server.registerTool(
+  "extract_parser_text",
+  {
+    description:
+      "Use the Zhipu file parser to extract text from PDF/Office files, optionally returning export assets.",
+    inputSchema: {
+      file: localFileSchema,
+      mode: z.enum(["lite", "export"]).optional()
+    },
+    outputSchema: extractParserTextOutputSchema.shape
+  },
+  async ({ file, mode }) => {
+    const result = await extractParserTextTool({ file, mode });
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      structuredContent: result
+    };
+  }
+);
+
+server.registerTool(
+  "extract_visual_text",
+  {
+    description:
+      "Extract OCR/VLM text from images, PDFs, or parser-exported image assets.",
+    inputSchema: {
+      engine: z.enum(["ocr", "vlm"]).optional(),
+      items: z.array(visualInputItemSchema).min(1)
+    },
+    outputSchema: extractVisualTextOutputSchema.shape
+  },
+  async ({ engine, items }) => {
+    const result = await extractVisualTextTool({ engine, items });
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      structuredContent: result
+    };
+  }
+);
+
+server.registerTool(
+  "render_pdf_pages",
+  {
+    description:
+      "Render a PDF into PNG page images for downstream page-level visual parsing.",
+    inputSchema: {
+      file: localFileSchema,
+      renderer: z.enum(["pdftoppm", "pdftocairo"]).optional()
+    },
+    outputSchema: renderPdfPagesOutputSchema.shape
+  },
+  async ({ file, renderer }) => {
+    const result = await renderPdfPagesTool({ file, renderer });
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
       structuredContent: result
     };
   }

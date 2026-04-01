@@ -1,4 +1,9 @@
 import { ParsePipelineError } from "./parse-pipeline-error.js";
+import {
+  fetchWithZhipuRetry,
+  getZhipuHttpRetryConfig,
+  type ZhipuHttpProgressEvent
+} from "./zhipu-http.js";
 
 const layoutParsingEndpoint = "https://open.bigmodel.cn/api/paas/v4/layout_parsing";
 const requestTimeoutMs = 120_000;
@@ -77,23 +82,35 @@ export async function runZhipuLayoutOcr(input: {
   apiKey: string;
   buffer: Buffer;
   mimeType: string;
+  onEvent?: (event: ZhipuHttpProgressEvent) => void;
 }): Promise<string> {
+  const retryConfig = getZhipuHttpRetryConfig();
   let response: Response;
 
   try {
-    response = await fetch(layoutParsingEndpoint, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${input.apiKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: "glm-ocr",
-        file: bufferToDataUrl(input.buffer, input.mimeType),
-        return_crop_images: false,
-        need_layout_visualization: false
-      }),
-      signal: AbortSignal.timeout(requestTimeoutMs)
+    response = await fetchWithZhipuRetry({
+      scope: `zhipu-ocr:${input.apiKey.slice(-8)}`,
+      url: layoutParsingEndpoint,
+      timeoutMs: requestTimeoutMs,
+      maxAttempts: retryConfig.maxAttempts,
+      baseDelayMs: retryConfig.baseDelayMs,
+      maxDelayMs: retryConfig.maxDelayMs,
+      minIntervalMs: retryConfig.minIntervalMs,
+      onEvent: input.onEvent,
+      label: "Zhipu layout_parsing OCR",
+      init: {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${input.apiKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model: "glm-ocr",
+          file: bufferToDataUrl(input.buffer, input.mimeType),
+          return_crop_images: false,
+          need_layout_visualization: false
+        })
+      }
     });
   } catch (error) {
     throw new ParsePipelineError({
@@ -105,14 +122,6 @@ export async function runZhipuLayoutOcr(input: {
 
   const rawText = await readResponseText(response);
   const payload = parseJsonSafely(rawText);
-
-  if (!response.ok) {
-    throw new ParsePipelineError({
-      code: "ZHIPU_OCR_REQUEST_FAILED",
-      message: readMessage(payload, `Zhipu OCR failed with status ${response.status}`),
-      retryable: response.status >= 500
-    });
-  }
 
   const mdResults =
     payload && typeof payload.md_results === "string" ? payload.md_results.trim() : "";

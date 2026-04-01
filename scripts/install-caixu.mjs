@@ -11,6 +11,7 @@ const repoRoot = resolve(__dirname, "..");
 const skillSpecs = [
   { name: "ingest-materials", dir: "caixu-ingest-materials" },
   { name: "build-asset-library", dir: "caixu-build-asset-library" },
+  { name: "maintain-asset-library", dir: "caixu-maintain-asset-library" },
   { name: "query-assets", dir: "caixu-query-assets" },
   { name: "check-lifecycle", dir: "caixu-check-lifecycle" },
   { name: "build-package", dir: "caixu-build-package" },
@@ -30,15 +31,31 @@ function parseArgs(argv) {
   const defaults = {
     runtimeDir: join(repoRoot, ".runtime"),
     judgeDemoUrl: process.env.CAIXU_JUDGE_DEMO_URL ?? "http://127.0.0.1:3000/judge-demo",
+    agentApiKey: process.env.CAIXU_AGENT_API_KEY ?? "",
+    agentModel: process.env.CAIXU_AGENT_MODEL ?? "glm-4.6",
     zhipuApiKey: process.env.ZHIPU_API_KEY ?? "",
     zhipuParserApiKey: process.env.CAIXU_ZHIPU_PARSER_API_KEY ?? "",
     zhipuOcrApiKey: process.env.CAIXU_ZHIPU_OCR_API_KEY ?? "",
     zhipuVlmApiKey: process.env.CAIXU_ZHIPU_VLM_API_KEY ?? "",
     parseMode: process.env.CAIXU_PARSE_MODE ?? "auto",
+    fileBatchSize: process.env.CAIXU_FILE_BATCH_SIZE ?? "6",
+    remoteParseConcurrency: process.env.CAIXU_REMOTE_PARSE_CONCURRENCY ?? "2",
+    buildAssetMaxRetries: process.env.CAIXU_BUILD_ASSET_MAX_RETRIES ?? "2",
+    cliProgress: process.env.CAIXU_CLI_PROGRESS ?? "true",
+    cliHeartbeatMs: process.env.CAIXU_CLI_HEARTBEAT_MS ?? "5000",
     zhipuParserMode: process.env.CAIXU_ZHIPU_PARSER_MODE ?? "lite",
+    agentTimeoutMs: process.env.CAIXU_AGENT_TIMEOUT_MS ?? "60000",
+    agentHttpMaxAttempts: process.env.CAIXU_AGENT_HTTP_MAX_ATTEMPTS ?? "4",
+    agentHttpBaseDelayMs: process.env.CAIXU_AGENT_HTTP_BASE_DELAY_MS ?? "2000",
+    agentHttpMaxDelayMs: process.env.CAIXU_AGENT_HTTP_MAX_DELAY_MS ?? "20000",
+    agentMinIntervalMs: process.env.CAIXU_AGENT_MIN_INTERVAL_MS ?? "1500",
     zhipuOcrEnabled: process.env.CAIXU_ZHIPU_OCR_ENABLED ?? "false",
     vlmModel: process.env.CAIXU_VLM_MODEL ?? "glm-4.6v",
     vlmPdfRenderer: process.env.CAIXU_VLM_PDF_RENDERER ?? "pdftoppm",
+    zhipuHttpMaxAttempts: process.env.CAIXU_ZHIPU_HTTP_MAX_ATTEMPTS ?? "4",
+    zhipuHttpBaseDelayMs: process.env.CAIXU_ZHIPU_HTTP_BASE_DELAY_MS ?? "2000",
+    zhipuHttpMaxDelayMs: process.env.CAIXU_ZHIPU_HTTP_MAX_DELAY_MS ?? "20000",
+    zhipuMinIntervalMs: process.env.CAIXU_ZHIPU_MIN_INTERVAL_MS ?? "1500",
     skipInstall: false,
     skipVerify: false,
     skipSmoke: false,
@@ -84,6 +101,16 @@ function parseArgs(argv) {
       index += 1;
       continue;
     }
+    if (arg === "--agent-api-key") {
+      options.agentApiKey = next ?? "";
+      index += 1;
+      continue;
+    }
+    if (arg === "--agent-model") {
+      options.agentModel = next ?? "";
+      index += 1;
+      continue;
+    }
     if (arg === "--zhipu-api-key") {
       options.zhipuApiKey = next ?? "";
       index += 1;
@@ -114,8 +141,38 @@ function parseArgs(argv) {
       index += 1;
       continue;
     }
+    if (arg === "--cli-progress") {
+      options.cliProgress = next ?? "";
+      index += 1;
+      continue;
+    }
+    if (arg === "--cli-heartbeat-ms") {
+      options.cliHeartbeatMs = next ?? "";
+      index += 1;
+      continue;
+    }
     if (arg === "--zhipu-ocr-enabled") {
       options.zhipuOcrEnabled = next ?? "";
+      index += 1;
+      continue;
+    }
+    if (arg === "--agent-http-max-attempts") {
+      options.agentHttpMaxAttempts = next ?? "";
+      index += 1;
+      continue;
+    }
+    if (arg === "--agent-http-base-delay-ms") {
+      options.agentHttpBaseDelayMs = next ?? "";
+      index += 1;
+      continue;
+    }
+    if (arg === "--agent-http-max-delay-ms") {
+      options.agentHttpMaxDelayMs = next ?? "";
+      index += 1;
+      continue;
+    }
+    if (arg === "--agent-min-interval-ms") {
+      options.agentMinIntervalMs = next ?? "";
       index += 1;
       continue;
     }
@@ -126,6 +183,26 @@ function parseArgs(argv) {
     }
     if (arg === "--vlm-pdf-renderer") {
       options.vlmPdfRenderer = next ?? "";
+      index += 1;
+      continue;
+    }
+    if (arg === "--zhipu-http-max-attempts") {
+      options.zhipuHttpMaxAttempts = next ?? "";
+      index += 1;
+      continue;
+    }
+    if (arg === "--zhipu-http-base-delay-ms") {
+      options.zhipuHttpBaseDelayMs = next ?? "";
+      index += 1;
+      continue;
+    }
+    if (arg === "--zhipu-http-max-delay-ms") {
+      options.zhipuHttpMaxDelayMs = next ?? "";
+      index += 1;
+      continue;
+    }
+    if (arg === "--zhipu-min-interval-ms") {
+      options.zhipuMinIntervalMs = next ?? "";
       index += 1;
       continue;
     }
@@ -193,15 +270,27 @@ Options:
   --skills-manifest-out PATH Generated skills manifest path
   --merge-mcp-config PATH    Merge generated MCP servers into an existing JSON file
   --judge-demo-url URL       Judge demo URL
+  --agent-api-key KEY        Agent model API key
+  --agent-model MODEL        Agent model code. Default: glm-4.6
   --zhipu-api-key KEY        Zhipu API key
   --zhipu-parser-api-key KEY Parser API key. Falls back to ZHIPU_API_KEY
   --zhipu-ocr-api-key KEY    OCR API key. Falls back to parser key or ZHIPU_API_KEY
   --zhipu-vlm-api-key KEY    VLM API key. Falls back to ZHIPU_API_KEY
   --parse-mode MODE          Parse mode. Default: auto
   --zhipu-parser-mode MODE   Parser mode: lite | export
+  --cli-progress BOOL        Enable append-only progress.jsonl output: true | false
+  --cli-heartbeat-ms N       Heartbeat interval for progress.jsonl. Default: 5000
   --zhipu-ocr-enabled BOOL   Enable paid layout_parsing OCR: true | false
+  --agent-http-max-attempts N
+  --agent-http-base-delay-ms N
+  --agent-http-max-delay-ms N
+  --agent-min-interval-ms N
   --vlm-model MODEL          VLM fallback model. Default: glm-4.6v
   --vlm-pdf-renderer NAME    PDF renderer: pdftoppm | pdftocairo
+  --zhipu-http-max-attempts N
+  --zhipu-http-base-delay-ms N
+  --zhipu-http-max-delay-ms N
+  --zhipu-min-interval-ms N
   --skip-install             Skip pnpm install
   --skip-verify             Skip pnpm test/typecheck/build
   --skip-smoke              Skip pnpm smoke:agent
@@ -273,10 +362,26 @@ function writeExecutable(pathname, content) {
 
 function buildEnvFileContent(options) {
   return `export CAIXU_PARSE_MODE=${shellString(options.parseMode)}
+export CAIXU_FILE_BATCH_SIZE=${shellString(options.fileBatchSize)}
+export CAIXU_REMOTE_PARSE_CONCURRENCY=${shellString(options.remoteParseConcurrency)}
+export CAIXU_BUILD_ASSET_MAX_RETRIES=${shellString(options.buildAssetMaxRetries)}
+export CAIXU_CLI_PROGRESS=${shellString(options.cliProgress)}
+export CAIXU_CLI_HEARTBEAT_MS=${shellString(options.cliHeartbeatMs)}
+export CAIXU_AGENT_MODEL=${shellString(options.agentModel)}
+export CAIXU_AGENT_TIMEOUT_MS=${shellString(options.agentTimeoutMs)}
+export CAIXU_AGENT_HTTP_MAX_ATTEMPTS=${shellString(options.agentHttpMaxAttempts)}
+export CAIXU_AGENT_HTTP_BASE_DELAY_MS=${shellString(options.agentHttpBaseDelayMs)}
+export CAIXU_AGENT_HTTP_MAX_DELAY_MS=${shellString(options.agentHttpMaxDelayMs)}
+export CAIXU_AGENT_MIN_INTERVAL_MS=${shellString(options.agentMinIntervalMs)}
+export CAIXU_AGENT_API_KEY=${shellString(options.agentApiKey)}
 export CAIXU_ZHIPU_PARSER_MODE=${shellString(options.zhipuParserMode)}
 export CAIXU_ZHIPU_OCR_ENABLED=${shellString(options.zhipuOcrEnabled)}
 export CAIXU_VLM_MODEL=${shellString(options.vlmModel)}
 export CAIXU_VLM_PDF_RENDERER=${shellString(options.vlmPdfRenderer)}
+export CAIXU_ZHIPU_HTTP_MAX_ATTEMPTS=${shellString(options.zhipuHttpMaxAttempts)}
+export CAIXU_ZHIPU_HTTP_BASE_DELAY_MS=${shellString(options.zhipuHttpBaseDelayMs)}
+export CAIXU_ZHIPU_HTTP_MAX_DELAY_MS=${shellString(options.zhipuHttpMaxDelayMs)}
+export CAIXU_ZHIPU_MIN_INTERVAL_MS=${shellString(options.zhipuMinIntervalMs)}
 export CAIXU_ZHIPU_PARSER_API_KEY=${shellString(options.zhipuParserApiKey)}
 export CAIXU_ZHIPU_OCR_API_KEY=${shellString(options.zhipuOcrApiKey)}
 export CAIXU_ZHIPU_VLM_API_KEY=${shellString(options.zhipuVlmApiKey)}

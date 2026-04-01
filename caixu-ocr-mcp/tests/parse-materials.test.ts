@@ -36,6 +36,10 @@ const envKeys = [
   "CAIXU_ZHIPU_PARSER_API_KEY",
   "CAIXU_ZHIPU_OCR_API_KEY",
   "CAIXU_ZHIPU_VLM_API_KEY",
+  "CAIXU_ZHIPU_HTTP_MAX_ATTEMPTS",
+  "CAIXU_ZHIPU_HTTP_BASE_DELAY_MS",
+  "CAIXU_ZHIPU_HTTP_MAX_DELAY_MS",
+  "CAIXU_ZHIPU_MIN_INTERVAL_MS",
   "CAIXU_VLM_MODEL",
   "CAIXU_VLM_PDF_RENDERER",
   "ZHIPU_API_KEY"
@@ -88,21 +92,27 @@ describe("@caixu/ocr-mcp parse_materials", () => {
 
     expect(result.status).toBe("success");
     expect(result.data?.parsed_count).toBe(1);
+    expect(result.data?.warning_count).toBe(0);
+    expect(result.data?.skipped_count).toBe(0);
     expect(result.data?.parsed_files[0]?.parse_status).toBe("parsed");
     expect(result.data?.parsed_files[0]?.provider).toBe("local");
     expect(parserMock.parseWithZhipuParser).not.toHaveBeenCalled();
   });
 
-  it("keeps unsupported binaries as binary_only", async () => {
+  it("skips unsupported binaries with structured diagnostics", async () => {
     const binaryPath = await createTempFile("archive.bin", Buffer.from([0x00, 0x01, 0x02]));
 
     const result = await parseMaterialPaths({
       file_paths: [binaryPath]
     });
 
-    expect(result.status).toBe("success");
-    expect(result.data?.parsed_files[0]?.parse_status).toBe("binary_only");
-    expect(result.data?.parsed_files[0]?.provider).toBe("local");
+    expect(result.status).toBe("partial");
+    expect(result.data?.parsed_count).toBe(0);
+    expect(result.data?.failed_count).toBe(0);
+    expect(result.data?.warning_count).toBe(0);
+    expect(result.data?.skipped_count).toBe(1);
+    expect(result.data?.skipped_files[0]?.code).toBe("UNSUPPORTED_FILE_SKIPPED");
+    expect(result.data?.skipped_files[0]?.file_name).toBe("archive.bin");
   });
 
   it("keeps binaries as binary_only in local mode", async () => {
@@ -115,8 +125,24 @@ describe("@caixu/ocr-mcp parse_materials", () => {
 
     expect(result.status).toBe("success");
     expect(result.data?.parsed_files[0]?.parse_status).toBe("binary_only");
+    expect(result.data?.warning_count).toBe(0);
+    expect(result.data?.skipped_count).toBe(0);
     expect(parserMock.parseWithZhipuParser).not.toHaveBeenCalled();
     expect(ocrMock.runZhipuLayoutOcr).not.toHaveBeenCalled();
+  });
+
+  it("skips office temp lock files instead of treating them as real materials", async () => {
+    const tempDocPath = await createTempFile("~$resume.docx", Buffer.from("fake-docx"));
+
+    const result = await parseMaterialPaths({
+      file_paths: [tempDocPath]
+    });
+
+    expect(result.status).toBe("partial");
+    expect(result.data?.parsed_count).toBe(0);
+    expect(result.data?.skipped_count).toBe(1);
+    expect(result.data?.skipped_files[0]?.code).toBe("OFFICE_TEMP_FILE_SKIPPED");
+    expect(parserMock.parseWithZhipuParser).not.toHaveBeenCalled();
   });
 
   it("routes raw images to paid OCR when enabled", async () => {
@@ -132,6 +158,7 @@ describe("@caixu/ocr-mcp parse_materials", () => {
     expect(result.status).toBe("success");
     expect(result.data?.parsed_files[0]?.provider).toBe("zhipu_ocr");
     expect(result.data?.parsed_files[0]?.extracted_text).toContain("Demo Student");
+    expect(result.data?.skipped_count).toBe(0);
     expect(ocrMock.runZhipuLayoutOcr).toHaveBeenCalledTimes(1);
     expect(vlmMock.runZhipuVlmOcr).not.toHaveBeenCalled();
     expect(parserMock.parseWithZhipuParser).not.toHaveBeenCalled();
@@ -150,6 +177,7 @@ describe("@caixu/ocr-mcp parse_materials", () => {
 
     expect(result.status).toBe("success");
     expect(result.data?.parsed_files[0]?.provider).toBe("zhipu_vlm");
+    expect(result.data?.skipped_count).toBe(0);
     expect(vlmMock.runZhipuVlmOcr).toHaveBeenCalledTimes(1);
     expect(ocrMock.runZhipuLayoutOcr).not.toHaveBeenCalled();
   });
@@ -386,9 +414,12 @@ describe("@caixu/ocr-mcp parse_materials", () => {
 
     expect(result.status).toBe("partial");
     expect(result.data?.parsed_count).toBe(1);
-    expect(result.data?.failed_count).toBe(1);
+    expect(result.data?.failed_count).toBe(0);
+    expect(result.data?.warning_count).toBe(1);
+    expect(result.data?.skipped_count).toBe(0);
     expect(result.data?.parsed_files[0]?.provider).toBe("zhipu_parser_export");
-    expect(result.data?.failed_files[0]?.file_id).toBe(result.data?.parsed_files[0]?.file_id);
+    expect(result.data?.warning_files[0]?.file_id).toBe(result.data?.parsed_files[0]?.file_id);
+    expect(result.data?.warning_files[0]?.file_name).toBe("proof.docx");
   });
 
   it("fails structured when live parsing is required but API key is missing", async () => {
@@ -401,6 +432,8 @@ describe("@caixu/ocr-mcp parse_materials", () => {
 
     expect(result.status).toBe("failed");
     expect(result.data?.parsed_count).toBe(0);
+    expect(result.data?.warning_count).toBe(0);
+    expect(result.data?.skipped_count).toBe(0);
     expect(result.errors?.[0]?.code).toBe("ZHIPU_API_KEY_MISSING");
   });
 
@@ -411,5 +444,7 @@ describe("@caixu/ocr-mcp parse_materials", () => {
 
     expect(result.status).toBe("failed");
     expect(result.errors?.[0]?.code).toBe("PARSE_MATERIAL_FAILED");
+    expect(result.data?.failed_files[0]?.file_name).toBe("missing-file.txt");
+    expect(result.data?.skipped_count).toBe(0);
   });
 });

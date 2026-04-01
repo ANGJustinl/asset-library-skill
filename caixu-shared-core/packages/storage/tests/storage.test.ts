@@ -75,7 +75,10 @@ describe("@caixu/storage", () => {
           }
         ],
         confidence: 0.98,
-        normalized_summary: "Transcript for internship application."
+        normalized_summary: "Transcript for internship application.",
+        asset_state: "active",
+        review_status: "auto",
+        last_verified_at: null
       }
     ];
 
@@ -138,6 +141,54 @@ describe("@caixu/storage", () => {
     expect(query.merged_assets[0]?.merged_asset_id).toBe("merged_transcript_001");
   });
 
+  it("supports maintenance overview, review queue, patch, and archive", () => {
+    const storage = makeStorage();
+    const library = storage.createOrLoadLibrary("lib_demo_student_maintenance", "demo_student");
+    storage.upsertAssetCards(library.library_id, [
+      {
+        schema_version: "1.0",
+        library_id: library.library_id,
+        asset_id: "asset_resume_001",
+        material_type: "experience",
+        title: "个人简历",
+        holder_name: "Demo Student",
+        issuer_name: null,
+        issue_date: null,
+        expiry_date: null,
+        validity_status: "unknown",
+        reusable_scenarios: [],
+        sensitivity_level: "medium",
+        source_files: [
+          {
+            file_id: "file_resume_001",
+            file_name: "resume.pdf",
+            mime_type: "application/pdf"
+          }
+        ],
+        confidence: 0.62,
+        normalized_summary: "Demo Student 的个人简历。",
+        asset_state: "active",
+        review_status: "needs_review",
+        last_verified_at: null
+      }
+    ]);
+
+    const overview = storage.getLibraryOverview(library.library_id);
+    const reviewQueue = storage.listReviewQueue(library.library_id);
+    const patched = storage.patchAssetCard(library.library_id, "asset_resume_001", {
+      normalized_summary: "Demo Student 的个人简历，已人工确认。",
+      review_status: "reviewed"
+    });
+    const archived = storage.setAssetState(library.library_id, "asset_resume_001", "archived");
+
+    expect(overview?.counts.needs_review_assets).toBe(1);
+    expect(reviewQueue.asset_cards).toHaveLength(1);
+    expect(patched?.asset_card.review_status).toBe("reviewed");
+    expect(patched?.change_event.action).toBe("patch");
+    expect(archived?.asset_card.asset_state).toBe("archived");
+    expect(storage.queryAssets({ library_id: library.library_id }).asset_cards).toHaveLength(0);
+  });
+
   it("stores lifecycle/package runs with audit sidecars", () => {
     const storage = makeStorage();
     const library = storage.createOrLoadLibrary("lib_demo_student_001");
@@ -172,8 +223,9 @@ describe("@caixu/storage", () => {
       library_id: library.library_id,
       goal: "summer_internship_application",
       profile_id: "summer_internship_application",
-      model: "glm-5",
+      model: "glm-4.6",
       input_asset_ids: [],
+      input_file_ids: [],
       input_summary: "Empty library audit.",
       validation_status: "passed",
       validation_errors: [],
@@ -235,8 +287,9 @@ describe("@caixu/storage", () => {
       library_id: library.library_id,
       goal: "summer_internship_application",
       profile_id: "summer_internship_application",
-      model: "glm-5",
+      model: "glm-4.6",
       input_asset_ids: [],
+      input_file_ids: [],
       input_summary: "Package selection audit.",
       validation_status: "passed",
       validation_errors: [],
