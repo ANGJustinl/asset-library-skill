@@ -14,6 +14,9 @@ export const validityStatusSchema = z.enum([
 ]);
 export const assetStateSchema = z.enum(["active", "archived"]);
 export const reviewStatusSchema = z.enum(["auto", "needs_review", "reviewed"]);
+export const agentTagSchema = z
+  .string()
+  .regex(/^(doc|use|entity|risk):[a-z0-9_]+$/u);
 
 export const sourceFileSchema = z.object({
   file_id: z.string().min(1),
@@ -139,6 +142,7 @@ export const assetCardSchema = z.object({
   issue_date: z.string().nullable(),
   expiry_date: z.string().nullable(),
   validity_status: validityStatusSchema,
+  agent_tags: z.array(agentTagSchema).default([]),
   reusable_scenarios: z.array(z.string().min(1)).default([]),
   sensitivity_level: z.enum(["low", "medium", "high"]),
   source_files: z.array(sourceFileSchema).min(1),
@@ -348,6 +352,13 @@ export const queryAssetsDataSchema = z.object({
   merged_assets: z.array(mergedAssetSchema).default([])
 });
 
+export const reindexLibrarySearchDataSchema = z.object({
+  library_id: z.string().min(1),
+  indexed_assets: z.number().int().nonnegative(),
+  skipped_assets: z.number().int().nonnegative(),
+  model: z.string().min(1)
+});
+
 export const libraryOverviewSchema = z.object({
   library_id: z.string().min(1),
   owner_hint: z.string().nullable(),
@@ -534,6 +545,7 @@ export type ParseMaterialsData = z.infer<typeof parseMaterialsDataSchema>;
 export type BuildAssetLibraryData = z.infer<typeof buildAssetLibraryDataSchema>;
 export type BuildAssetLibraryDecision = BuildAssetLibraryData;
 export type QueryAssetsData = z.infer<typeof queryAssetsDataSchema>;
+export type ReindexLibrarySearchData = z.infer<typeof reindexLibrarySearchDataSchema>;
 export type LibraryOverview = z.infer<typeof libraryOverviewSchema>;
 export type ListLibrariesData = z.infer<typeof listLibrariesDataSchema>;
 export type AssetChangeEvent = z.infer<typeof assetChangeEventSchema>;
@@ -554,6 +566,7 @@ export type AgentDecisionAudit = z.infer<typeof agentDecisionAuditSchema>;
 export type ValidationStatus = z.infer<typeof validationStatusSchema>;
 export type AssetState = z.infer<typeof assetStateSchema>;
 export type ReviewStatus = z.infer<typeof reviewStatusSchema>;
+export type AgentTag = z.infer<typeof agentTagSchema>;
 export type ToolResult<T> = {
   status: z.infer<typeof toolStatusSchema>;
   trace_id: string;
@@ -566,6 +579,149 @@ export type ToolResult<T> = {
 
 export function createTraceId(prefix = "trace"): string {
   return `${prefix}_${randomUUID().replaceAll("-", "")}`;
+}
+
+function normalizeTagFragment(value: string): string | null {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_:\-]+/gu, "_")
+    .replace(/[-]+/gu, "_")
+    .replace(/_{2,}/gu, "_")
+    .replace(/^_+|_+$/gu, "");
+
+  return normalized.length > 0 ? normalized : null;
+}
+
+function inferDocTag(input: {
+  material_type?: string | null;
+  title?: string | null;
+  normalized_summary?: string | null;
+}): string {
+  const haystack = `${input.title ?? ""} ${input.normalized_summary ?? ""}`.toLowerCase();
+  if (/简历|resume/u.test(haystack)) return "doc:resume";
+  if (/成绩单|transcript/u.test(haystack)) return "doc:transcript";
+  if (/在读|学籍|student.status/u.test(haystack)) return "doc:student_status";
+  if (/证书|certificate|获奖/u.test(haystack)) return "doc:certificate";
+  if (/身份证|护照|id.card|passport/u.test(haystack)) return "doc:identity";
+  if (/发票|invoice|报销/u.test(haystack)) return "doc:invoice";
+  if (/合同|协议|agreement|contract/u.test(haystack)) return "doc:agreement";
+  if (input.material_type === "experience") return "doc:experience";
+  if (input.material_type === "finance") return "doc:finance";
+  if (input.material_type === "agreement") return "doc:agreement";
+  if (input.material_type === "rights") return "doc:rights";
+  return "doc:proof";
+}
+
+function inferEntityTags(input: {
+  title?: string | null;
+  normalized_summary?: string | null;
+  material_type?: string | null;
+}): string[] {
+  const haystack = `${input.title ?? ""} ${input.normalized_summary ?? ""}`.toLowerCase();
+  const tags = new Set<string>();
+
+  if (/成绩单|transcript/u.test(haystack)) tags.add("entity:transcript");
+  if (/四六级|cet|雅思|托福|语言/u.test(haystack)) tags.add("entity:language_certificate");
+  if (/在读|学籍|student.status/u.test(haystack)) tags.add("entity:student_status_certificate");
+  if (/实习|internship/u.test(haystack)) tags.add("entity:internship_experience");
+  if (/项目|project/u.test(haystack)) tags.add("entity:project_experience");
+  if (/竞赛|比赛|award|获奖/u.test(haystack)) tags.add("entity:award_certificate");
+  if (/身份证|护照|passport|id.card/u.test(haystack)) tags.add("entity:identity_document");
+  if (/发票|invoice|报销/u.test(haystack)) tags.add("entity:invoice");
+  if (/合同|协议|agreement|contract/u.test(haystack)) tags.add("entity:agreement");
+
+  if (tags.size === 0) {
+    if (input.material_type === "experience") tags.add("entity:experience_record");
+    else if (input.material_type === "finance") tags.add("entity:finance_record");
+    else if (input.material_type === "agreement") tags.add("entity:agreement_record");
+    else tags.add("entity:material_record");
+  }
+
+  return [...tags];
+}
+
+function inferRiskTag(input: {
+  review_status?: string | null;
+  confidence?: number | null;
+}): string {
+  if (input.review_status === "needs_review") {
+    return "risk:needs_review";
+  }
+  if ((input.confidence ?? 1) < 0.75) {
+    return "risk:low_confidence";
+  }
+  if (input.review_status === "reviewed") {
+    return "risk:reviewed";
+  }
+  return "risk:auto";
+}
+
+type AgentTagSeed = {
+  material_type?: string | null;
+  title?: string | null;
+  normalized_summary?: string | null;
+  confidence?: number | null;
+  review_status?: string | null;
+  reusable_scenarios?: string[] | null;
+  agent_tags?: string[] | null;
+};
+
+export function deriveReusableScenariosFromAgentTags(agentTags: string[]): string[] {
+  return [...new Set(
+    agentTags
+      .filter((tag) => tag.startsWith("use:"))
+      .map((tag) => tag.slice(4))
+      .filter((tag) => tag.length > 0)
+  )];
+}
+
+export function sanitizeAgentTags(input: AgentTagSeed): string[] {
+  const tags = new Set<string>();
+  for (const rawTag of input.agent_tags ?? []) {
+    const normalized = normalizeTagFragment(rawTag);
+    if (!normalized) continue;
+    const parsed = agentTagSchema.safeParse(normalized);
+    if (parsed.success) tags.add(parsed.data);
+  }
+
+  for (const scenario of input.reusable_scenarios ?? []) {
+    const normalizedScenario = normalizeTagFragment(scenario);
+    if (normalizedScenario) {
+      tags.add(`use:${normalizedScenario}`);
+    }
+  }
+
+  tags.add(inferDocTag(input));
+  for (const entityTag of inferEntityTags(input)) {
+    tags.add(entityTag);
+  }
+  tags.add(inferRiskTag(input));
+
+  if (![...tags].some((tag) => tag.startsWith("use:"))) {
+    tags.add("use:general_reference");
+  }
+
+  return [...tags].slice(0, 12);
+}
+
+export function buildAgentTagsText(agentTags: string[]): string {
+  return [...new Set(agentTags)].join(" ");
+}
+
+export function buildAssetSearchText(input: Pick<
+  AgentTagSeed,
+  "material_type" | "title" | "normalized_summary" | "agent_tags"
+>): string {
+  return [
+    input.title ?? "",
+    input.normalized_summary ?? "",
+    input.material_type ?? "",
+    buildAgentTagsText(input.agent_tags ?? [])
+  ]
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .join(" ");
 }
 
 export function createRunId(prefix = "run"): string {

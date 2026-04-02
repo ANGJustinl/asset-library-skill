@@ -3,9 +3,11 @@ import {
   agentDecisionAuditSchema,
   assetCardSchema,
   buildAssetLibraryDataSchema,
+  deriveReusableScenariosFromAgentTags,
   makeToolResult,
   parseMaterialsDataSchema,
   ruleProfileSchema,
+  sanitizeAgentTags,
   toolResultSchema
 } from "../src/index.js";
 
@@ -22,6 +24,12 @@ describe("@caixu/contracts", () => {
       issue_date: "2026-03-01",
       expiry_date: null,
       validity_status: "long_term",
+      agent_tags: [
+        "doc:transcript",
+        "entity:transcript",
+        "use:summer_internship_application",
+        "risk:auto"
+      ],
       reusable_scenarios: ["summer_internship_application"],
       sensitivity_level: "medium",
       source_files: [
@@ -39,6 +47,25 @@ describe("@caixu/contracts", () => {
     });
 
     expect(parsed.asset_id).toBe("asset_transcript_001");
+  });
+
+  it("derives compatibility reusable_scenarios from agent tags", () => {
+    const tags = sanitizeAgentTags({
+      material_type: "proof",
+      title: "CET-6 成绩单",
+      normalized_summary: "语言证书，可用于暑期实习申请。",
+      agent_tags: ["use:summer_internship_application", "entity:language_certificate"]
+    });
+
+    expect(tags).toEqual(
+      expect.arrayContaining([
+        "use:summer_internship_application",
+        "entity:language_certificate"
+      ])
+    );
+    expect(deriveReusableScenariosFromAgentTags(tags)).toEqual([
+      "summer_internship_application"
+    ]);
   });
 
   it("wraps structured data in ToolResult", () => {

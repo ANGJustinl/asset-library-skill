@@ -2,6 +2,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
+import * as sqliteVec from "sqlite-vec";
 import type {
   AgentDecisionAudit,
   AssetChangeEvent,
@@ -21,8 +22,15 @@ import type {
   PipelineStep,
   ParsedFile,
   QueryAssetsData,
+  ReindexLibrarySearchData,
   ReviewQueueData,
   ReviewStatus
+} from "@caixu/contracts";
+import {
+  buildAgentTagsText,
+  buildAssetSearchText,
+  deriveReusableScenariosFromAgentTags,
+  sanitizeAgentTags
 } from "@caixu/contracts";
 
 type AssetQuery = {
@@ -30,9 +38,13 @@ type AssetQuery = {
   material_types?: string[];
   keyword?: string;
   reusable_scenario?: string;
+  semantic_query?: string;
+  tag_filters_any?: string[];
+  tag_filters_all?: string[];
   validity_statuses?: string[];
   asset_states?: AssetState[];
   review_statuses?: ReviewStatus[];
+  limit?: number;
 };
 
 type LibraryRecord = {
@@ -54,8 +66,11 @@ function normalizeStoredAssetCard(
   value: AssetCard &
     Partial<Pick<AssetCard, "asset_state" | "review_status" | "last_verified_at">>
 ): AssetCard {
+  const agentTags = sanitizeAgentTags(value);
   return {
     ...value,
+    agent_tags: agentTags,
+    reusable_scenarios: deriveReusableScenariosFromAgentTags(agentTags),
     asset_state: value.asset_state ?? "active",
     review_status: value.review_status ?? "auto",
     last_verified_at: value.last_verified_at ?? null
@@ -64,19 +79,31 @@ function normalizeStoredAssetCard(
 
 export class CaixuStorage {
   readonly db: DatabaseSync;
+  readonly vectorSearchEnabled: boolean;
 
   constructor(dbPath: string) {
     mkdirSync(dirname(dbPath), { recursive: true });
-    this.db = new DatabaseSync(dbPath);
+    this.db = new DatabaseSync(dbPath, { allowExtension: true });
+    this.vectorSearchEnabled = this.loadSqliteVecExtension();
     this.db.exec("PRAGMA journal_mode = WAL");
     this.db.exec("PRAGMA foreign_keys = ON");
     this.ensureSchema();
     this.ensureAssetFieldNullability();
     this.ensureAssetMaintenanceFields();
+    this.ensureSearchSchema();
   }
 
   close(): void {
     this.db.close();
+  }
+
+  loadSqliteVecExtension(): boolean {
+    try {
+      sqliteVec.load(this.db);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   ensureSchema(): void {
@@ -228,6 +255,42 @@ export class CaixuStorage {
       CREATE INDEX IF NOT EXISTS idx_pipeline_steps_run_id ON pipeline_steps(run_id, created_at);
       CREATE INDEX IF NOT EXISTS idx_asset_change_events_library_id ON asset_change_events(library_id, created_at);
     `);
+  }
+
+  ensureSearchSchema(): void {
+    this.db.exec(`
+      CREATE VIRTUAL TABLE IF NOT EXISTS asset_search_fts USING fts5(
+        asset_id UNINDEXED,
+        library_id UNINDEXED,
+        title,
+        normalized_summary,
+        agent_tags_text,
+        search_text,
+        tokenize='trigram'
+      );
+
+      CREATE TABLE IF NOT EXISTS asset_embedding_meta (
+        vec_rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+        asset_id TEXT NOT NULL UNIQUE,
+        library_id TEXT NOT NULL,
+        search_text TEXT NOT NULL,
+        agent_tags_text TEXT NOT NULL,
+        tag_blob TEXT NOT NULL,
+        model TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_asset_embedding_meta_library_id
+      ON asset_embedding_meta(library_id, updated_at);
+    `);
+
+    if (this.vectorSearchEnabled) {
+      this.db.exec(`
+        CREATE VIRTUAL TABLE IF NOT EXISTS asset_embedding_vec USING vec0(
+          embedding float[384]
+        );
+      `);
+    }
   }
 
   ensureAssetFieldNullability(): void {
@@ -769,6 +832,40 @@ export class CaixuStorage {
     );
   }
 
+  getAssetCardsByIds(libraryId: string, assetIds: string[]): AssetCard[] {
+    if (assetIds.length === 0) {
+      return [];
+    }
+
+    const rows = this.db
+      .prepare(
+        `SELECT payload_json, asset_state, review_status, last_verified_at
+         FROM assets
+         WHERE library_id = ?
+         AND asset_id IN (${assetIds.map(() => "?").join(",")})`
+      )
+      .all(libraryId, ...assetIds) as Array<{
+      payload_json: string;
+      asset_state: AssetState;
+      review_status: ReviewStatus;
+      last_verified_at: string | null;
+    }>;
+
+    const byId = new Map(
+      rows.map((row) => {
+        const asset = normalizeStoredAssetCard({
+          ...parseJson<AssetCard>(row.payload_json),
+          asset_state: row.asset_state,
+          review_status: row.review_status,
+          last_verified_at: row.last_verified_at
+        });
+        return [asset.asset_id, asset] as const;
+      })
+    );
+
+    return assetIds.map((assetId) => byId.get(assetId)).filter((asset): asset is AssetCard => Boolean(asset));
+  }
+
   upsertMergedAssets(libraryId: string, mergedAssets: MergedAsset[]): MergedAsset[] {
     const statement = this.db.prepare(`
       INSERT INTO merged_assets (
@@ -815,6 +912,224 @@ export class CaixuStorage {
     );
   }
 
+  upsertAssetSearchIndex(input: {
+    library_id: string;
+    assets: Array<{
+      asset_id: string;
+      title: string;
+      normalized_summary: string;
+      agent_tags: string[];
+      search_text: string;
+      embedding: number[] | null;
+      model: string;
+    }>;
+  }): ReindexLibrarySearchData {
+    const deleteFts = this.db.prepare("DELETE FROM asset_search_fts WHERE asset_id = ?");
+    const insertFts = this.db.prepare(
+      `INSERT INTO asset_search_fts (
+        asset_id, library_id, title, normalized_summary, agent_tags_text, search_text
+      ) VALUES (?, ?, ?, ?, ?, ?)`
+    );
+    const findMeta = this.db.prepare(
+      "SELECT vec_rowid FROM asset_embedding_meta WHERE asset_id = ?"
+    );
+    const deleteMeta = this.db.prepare("DELETE FROM asset_embedding_meta WHERE asset_id = ?");
+    const deleteVec = this.vectorSearchEnabled
+      ? this.db.prepare("DELETE FROM asset_embedding_vec WHERE rowid = ?")
+      : null;
+    const insertMeta = this.db.prepare(
+      `INSERT INTO asset_embedding_meta (
+        asset_id, library_id, search_text, agent_tags_text, tag_blob, model, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)`
+    );
+    const insertVec = this.vectorSearchEnabled
+      ? this.db.prepare("INSERT INTO asset_embedding_vec(rowid, embedding) VALUES (?, ?)")
+      : null;
+
+    let indexedAssets = 0;
+    let skippedAssets = 0;
+    const updatedAt = nowIso();
+    for (const asset of input.assets) {
+      deleteFts.run(asset.asset_id);
+      const existing = findMeta.get(asset.asset_id) as
+        | { vec_rowid: number | bigint }
+        | undefined;
+      if (existing && deleteVec) {
+        deleteVec.run(BigInt(existing.vec_rowid));
+      }
+      deleteMeta.run(asset.asset_id);
+
+      const agentTagsText = buildAgentTagsText(asset.agent_tags);
+      insertFts.run(
+        asset.asset_id,
+        input.library_id,
+        asset.title,
+        asset.normalized_summary,
+        agentTagsText,
+        asset.search_text
+      );
+
+      insertMeta.run(
+        asset.asset_id,
+        input.library_id,
+        asset.search_text,
+        agentTagsText,
+        `|${asset.agent_tags.join("|")}|`,
+        asset.model,
+        updatedAt
+      );
+      indexedAssets += 1;
+
+      if (!this.vectorSearchEnabled || !asset.embedding?.length) {
+        continue;
+      }
+
+      const vecRowId = (findMeta.get(asset.asset_id) as
+        | { vec_rowid: number | bigint }
+        | undefined)?.vec_rowid;
+      if (
+        (typeof vecRowId !== "number" && typeof vecRowId !== "bigint") ||
+        Number(vecRowId) <= 0
+      ) {
+        continue;
+      }
+      insertVec?.run(BigInt(vecRowId), JSON.stringify(asset.embedding));
+    }
+
+    return {
+      library_id: input.library_id,
+      indexed_assets: indexedAssets,
+      skipped_assets: skippedAssets,
+      model: input.assets[0]?.model ?? "unavailable"
+    };
+  }
+
+  removeAssetSearchIndex(assetIds: string[]): void {
+    if (assetIds.length === 0) {
+      return;
+    }
+
+    const findMeta = this.db.prepare(
+      "SELECT vec_rowid FROM asset_embedding_meta WHERE asset_id = ?"
+    );
+    const deleteVec = this.vectorSearchEnabled
+      ? this.db.prepare("DELETE FROM asset_embedding_vec WHERE rowid = ?")
+      : null;
+    const deleteMeta = this.db.prepare("DELETE FROM asset_embedding_meta WHERE asset_id = ?");
+    const deleteFts = this.db.prepare("DELETE FROM asset_search_fts WHERE asset_id = ?");
+
+    for (const assetId of assetIds) {
+      const existing = findMeta.get(assetId) as
+        | { vec_rowid: number | bigint }
+        | undefined;
+      if (existing && deleteVec) {
+        deleteVec.run(BigInt(existing.vec_rowid));
+      }
+      deleteMeta.run(assetId);
+      deleteFts.run(assetId);
+    }
+  }
+
+  searchAssetIdsByFts(input: {
+    library_id: string;
+    query: string;
+    limit: number;
+    allowed_asset_ids?: string[];
+  }): string[] {
+    const trimmed = input.query.trim();
+    if (!trimmed) {
+      return [];
+    }
+
+    let sql = `
+      SELECT asset_id
+      FROM asset_search_fts
+      WHERE library_id = ?
+        AND asset_search_fts MATCH ?
+    `;
+    const params: SQLInputValue[] = [input.library_id, trimmed];
+    if (input.allowed_asset_ids?.length) {
+      sql += ` AND asset_id IN (${input.allowed_asset_ids.map(() => "?").join(",")})`;
+      params.push(...input.allowed_asset_ids);
+    }
+    sql += " LIMIT ?";
+    params.push(input.limit);
+
+    const rows = this.db.prepare(sql).all(...params) as Array<{ asset_id: string }>;
+    return rows.map((row) => row.asset_id);
+  }
+
+  searchAssetIdsByTags(input: {
+    library_id: string;
+    tag_filters_any?: string[];
+    tag_filters_all?: string[];
+    limit: number;
+    allowed_asset_ids?: string[];
+  }): string[] {
+    const anyTags = [...new Set(input.tag_filters_any ?? [])].filter(Boolean);
+    const allTags = [...new Set(input.tag_filters_all ?? [])].filter(Boolean);
+    if (anyTags.length === 0 && allTags.length === 0) {
+      return [];
+    }
+
+    let sql = "SELECT asset_id FROM asset_embedding_meta WHERE library_id = ?";
+    const params: SQLInputValue[] = [input.library_id];
+
+    if (input.allowed_asset_ids?.length) {
+      sql += ` AND asset_id IN (${input.allowed_asset_ids.map(() => "?").join(",")})`;
+      params.push(...input.allowed_asset_ids);
+    }
+
+    if (allTags.length) {
+      for (const tag of allTags) {
+        sql += " AND instr(tag_blob, ?) > 0";
+        params.push(`|${tag}|`);
+      }
+    }
+
+    if (anyTags.length) {
+      sql += ` AND (${anyTags.map(() => "instr(tag_blob, ?) > 0").join(" OR ")})`;
+      for (const tag of anyTags) {
+        params.push(`|${tag}|`);
+      }
+    }
+
+    sql += " LIMIT ?";
+    params.push(input.limit);
+
+    const rows = this.db.prepare(sql).all(...params) as Array<{ asset_id: string }>;
+    return rows.map((row) => row.asset_id);
+  }
+
+  searchAssetIdsByVector(input: {
+    library_id: string;
+    query_embedding: number[];
+    limit: number;
+    allowed_asset_ids?: string[];
+  }): string[] {
+    if (!this.vectorSearchEnabled || input.query_embedding.length === 0) {
+      return [];
+    }
+
+    let sql = `
+      SELECT meta.asset_id
+      FROM asset_embedding_vec vec
+      JOIN asset_embedding_meta meta ON meta.vec_rowid = vec.rowid
+      WHERE vec.embedding MATCH ?
+        AND k = ?
+        AND meta.library_id = ?
+    `;
+    const params: SQLInputValue[] = [JSON.stringify(input.query_embedding), input.limit, input.library_id];
+
+    if (input.allowed_asset_ids?.length) {
+      sql += ` AND meta.asset_id IN (${input.allowed_asset_ids.map(() => "?").join(",")})`;
+      params.push(...input.allowed_asset_ids);
+    }
+
+    const rows = this.db.prepare(sql).all(...params) as Array<{ asset_id: string }>;
+    return rows.map((row) => row.asset_id);
+  }
+
   queryAssets(query: AssetQuery): QueryAssetsData {
     let sql = "SELECT payload_json FROM assets WHERE library_id = ?";
     const params: SQLInputValue[] = [query.library_id];
@@ -852,6 +1167,22 @@ export class CaixuStorage {
       assetCards = assetCards.filter((asset: AssetCard) =>
         asset.reusable_scenarios.includes(query.reusable_scenario as string)
       );
+    }
+
+    if (query.tag_filters_all?.length) {
+      assetCards = assetCards.filter((asset) =>
+        query.tag_filters_all!.every((tag) => asset.agent_tags.includes(tag))
+      );
+    }
+
+    if (query.tag_filters_any?.length) {
+      assetCards = assetCards.filter((asset) =>
+        query.tag_filters_any!.some((tag) => asset.agent_tags.includes(tag))
+      );
+    }
+
+    if (query.limit && query.limit > 0) {
+      assetCards = assetCards.slice(0, query.limit);
     }
 
     const matchedAssetIds = new Set(assetCards.map((asset) => asset.asset_id));
@@ -946,6 +1277,7 @@ export class CaixuStorage {
         | "issue_date"
         | "expiry_date"
         | "validity_status"
+        | "agent_tags"
         | "reusable_scenarios"
         | "sensitivity_level"
         | "normalized_summary"

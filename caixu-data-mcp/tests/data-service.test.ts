@@ -10,12 +10,24 @@ import type {
   ParsedFile
 } from "@caixu/contracts";
 import { createDataService } from "../src/service.js";
+import type { SearchEmbedder } from "../src/search-embedder.js";
 
 const services: Array<ReturnType<typeof createDataService>> = [];
 
+const fakeEmbedder: SearchEmbedder = {
+  modelId: "fake-multilingual-minilm",
+  dimensions: 384,
+  embedTexts(texts) {
+    return texts.map((text) => {
+      const base = [...text].reduce((sum, char) => sum + char.charCodeAt(0), 0) % 997;
+      return Array.from({ length: 384 }, (_, index) => ((base + index) % 101) / 100);
+    });
+  }
+};
+
 function makeService() {
   const dbPath = join(mkdtempSync(join(tmpdir(), "caixu-data-mcp-")), "caixu.sqlite");
-  const service = createDataService(dbPath);
+  const service = createDataService(dbPath, { searchEmbedder: fakeEmbedder });
   services.push(service);
   return service;
 }
@@ -73,6 +85,12 @@ describe("@caixu/data-mcp", () => {
         issue_date: "2026-03-01",
         expiry_date: null,
         validity_status: "long_term",
+        agent_tags: [
+          "doc:transcript",
+          "entity:transcript",
+          "use:summer_internship_application",
+          "risk:auto"
+        ],
         reusable_scenarios: ["summer_internship_application"],
         sensitivity_level: "medium",
         source_files: [
@@ -92,6 +110,11 @@ describe("@caixu/data-mcp", () => {
 
     service.upsertAssetCards({ library_id: libraryId, asset_cards: assetCards });
     const query = service.queryAssets({ library_id: libraryId, keyword: "Transcript" });
+    const semanticQuery = service.queryAssets({
+      library_id: libraryId,
+      semantic_query: "暑期实习申请要用的成绩单证明",
+      tag_filters_any: ["use:summer_internship_application"]
+    });
     const ruleProfile = service.getRuleProfile({
       profile_id: "summer_internship_application"
     });
@@ -100,8 +123,153 @@ describe("@caixu/data-mcp", () => {
     });
 
     expect(query.data?.asset_cards).toHaveLength(1);
+    expect(semanticQuery.data?.asset_cards).toHaveLength(1);
     expect(ruleProfile.data?.profile.bundle_version).toBe("2026.03");
     expect(submissionProfile.data?.profile.profile_id).toBe("judge_demo_v1");
+  });
+
+  it("keeps default queryAssets on FTS plus tags without calling the embedder", () => {
+    let embedCalls = 0;
+    const countingEmbedder: SearchEmbedder = {
+      modelId: "counting-embedder",
+      dimensions: 384,
+      embedTexts(texts) {
+        embedCalls += 1;
+        return texts.map((text) => {
+          const base = [...text].reduce((sum, char) => sum + char.charCodeAt(0), 0) % 997;
+          return Array.from({ length: 384 }, (_, index) => ((base + index) % 101) / 100);
+        });
+      }
+    };
+
+    const dbPath = join(mkdtempSync(join(tmpdir(), "caixu-data-mcp-")), "caixu.sqlite");
+    const service = createDataService(dbPath, { searchEmbedder: countingEmbedder });
+    services.push(service);
+    const libraryId = service.createOrLoadLibrary({ owner_hint: "demo_student" }).data!
+      .library_id;
+
+    service.upsertAssetCards({
+      library_id: libraryId,
+      asset_cards: [
+        {
+          schema_version: "1.0",
+          library_id: libraryId,
+          asset_id: "asset_resume_001",
+          material_type: "experience",
+          title: "个人简历",
+          holder_name: "Demo Student",
+          issuer_name: null,
+          issue_date: null,
+          expiry_date: null,
+          validity_status: "unknown",
+          agent_tags: [
+            "doc:resume",
+            "entity:project_experience",
+            "use:general_reference",
+            "risk:auto"
+          ],
+          reusable_scenarios: [],
+          sensitivity_level: "medium",
+          source_files: [
+            {
+              file_id: "file_resume_001",
+              file_name: "resume.pdf",
+              mime_type: "application/pdf"
+            }
+          ],
+          confidence: 0.9,
+          normalized_summary: "个人简历，包含教育背景与项目经历。",
+          asset_state: "active",
+          review_status: "auto",
+          last_verified_at: null
+        }
+      ]
+    });
+
+    embedCalls = 0;
+    const exactEnough = service.queryAssets({
+      library_id: libraryId,
+      semantic_query: "找我的简历",
+      tag_filters_any: ["doc:resume"],
+      material_types: ["experience"],
+      limit: 1
+    });
+
+    expect(exactEnough.status).toBe("success");
+    expect(exactEnough.data?.asset_cards).toHaveLength(1);
+    expect(embedCalls).toBe(0);
+  });
+
+  it("uses queryAssetsVector only when semantic vector search is explicitly requested", () => {
+    let embedCalls = 0;
+    const countingEmbedder: SearchEmbedder = {
+      modelId: "counting-embedder",
+      dimensions: 384,
+      embedTexts(texts) {
+        embedCalls += 1;
+        return texts.map((text) => {
+          const base = [...text].reduce((sum, char) => sum + char.charCodeAt(0), 0) % 997;
+          return Array.from({ length: 384 }, (_, index) => ((base + index) % 101) / 100);
+        });
+      }
+    };
+
+    const dbPath = join(mkdtempSync(join(tmpdir(), "caixu-data-mcp-")), "caixu.sqlite");
+    const service = createDataService(dbPath, { searchEmbedder: countingEmbedder });
+    services.push(service);
+    const libraryId = service.createOrLoadLibrary({ owner_hint: "demo_student" }).data!
+      .library_id;
+
+    service.upsertAssetCards({
+      library_id: libraryId,
+      asset_cards: [
+        {
+          schema_version: "1.0",
+          library_id: libraryId,
+          asset_id: "asset_resume_001",
+          material_type: "experience",
+          title: "个人简历",
+          holder_name: "Demo Student",
+          issuer_name: null,
+          issue_date: null,
+          expiry_date: null,
+          validity_status: "unknown",
+          agent_tags: [
+            "doc:resume",
+            "entity:project_experience",
+            "use:job_application",
+            "risk:auto"
+          ],
+          reusable_scenarios: ["job_application"],
+          sensitivity_level: "medium",
+          source_files: [
+            {
+              file_id: "file_resume_001",
+              file_name: "resume.pdf",
+              mime_type: "application/pdf"
+            }
+          ],
+          confidence: 0.9,
+          normalized_summary: "个人简历，包含教育背景与项目经历。",
+          asset_state: "active",
+          review_status: "auto",
+          last_verified_at: null
+        }
+      ]
+    });
+
+    embedCalls = 0;
+    const vectorResult = service.queryAssetsVector({
+      library_id: libraryId,
+      semantic_query: "查找与个人简历最相关的材料",
+      tag_filters_any: ["doc:resume"],
+      material_types: ["experience"],
+      limit: 1
+    });
+
+    expect(vectorResult.status).toBe("success");
+    expect(vectorResult.data?.asset_cards).toHaveLength(1);
+    expect(embedCalls).toBe(1);
   });
 
   it("exposes maintenance tools for overview, patch, archive, restore, and review queue", () => {
@@ -123,6 +291,12 @@ describe("@caixu/data-mcp", () => {
           issue_date: null,
           expiry_date: null,
           validity_status: "unknown",
+          agent_tags: [
+            "doc:resume",
+            "entity:experience_record",
+            "use:job_application",
+            "risk:needs_review"
+          ],
           reusable_scenarios: [],
           sensitivity_level: "medium",
           source_files: [
@@ -160,6 +334,7 @@ describe("@caixu/data-mcp", () => {
       library_id: libraryId,
       asset_id: "asset_resume_001"
     });
+    const reindexed = service.reindexLibrarySearch({ library_id: libraryId });
 
     expect(libraries.data?.libraries).toHaveLength(1);
     expect(overview.data?.counts.needs_review_assets).toBe(1);
@@ -168,6 +343,7 @@ describe("@caixu/data-mcp", () => {
     expect(archived.data?.asset_card.asset_state).toBe("archived");
     expect(activeQuery.data?.asset_cards).toHaveLength(0);
     expect(restored.data?.asset_card.asset_state).toBe("active");
+    expect(reindexed.data?.indexed_assets).toBeGreaterThan(0);
   });
 
   it("fails for unsupported rule profiles", () => {

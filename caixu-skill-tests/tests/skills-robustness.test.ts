@@ -24,6 +24,8 @@ const validTools = new Set([
   "caixu-data-mcp.list_review_queue",
   "caixu-data-mcp.upsert_merged_assets",
   "caixu-data-mcp.query_assets",
+  "caixu-data-mcp.query_assets_vector",
+  "caixu-data-mcp.reindex_library_search",
   "caixu-data-mcp.get_rule_profile",
   "caixu-data-mcp.write_lifecycle_run",
   "caixu-data-mcp.get_latest_lifecycle_run",
@@ -186,7 +188,8 @@ describe("skill robustness", () => {
 
     expect(skill).toContain("有界查询");
     expect(workflow).toContain("`证明类` -> `proof`");
-    expect(workflow).toContain("`实习申请` -> `summer_internship_application`");
+    expect(workflow).toContain('`tag_filters_any += ["use:summer_internship_application"]`');
+    expect(workflow).toContain("`reindex_library_search`");
     expect(failureModes).toContain("不伪造命中");
   });
 

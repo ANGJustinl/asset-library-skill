@@ -4,8 +4,10 @@ import { z, type ZodType } from "zod";
 import {
   assetCardSchema,
   checkLifecycleDataSchema,
+  deriveReusableScenariosFromAgentTags,
   localFileRouteSchema,
   packagePlanSchema,
+  sanitizeAgentTags,
   type AgentDecisionAudit,
   type AssetCard,
   type BuildAssetLibraryData,
@@ -34,7 +36,10 @@ import {
 const normalizedQuerySchema = z.object({
   material_types: z.array(z.string().min(1)).default([]),
   keyword: z.string().nullable().optional(),
-  reusable_scenario: z.string().nullable().optional(),
+  semantic_query: z.string().nullable().optional(),
+  tag_filters_any: z.array(z.string().min(1)).default([]),
+  tag_filters_all: z.array(z.string().min(1)).default([]),
+  limit: z.number().int().positive().nullable().optional(),
   validity_statuses: z.array(z.string().min(1)).default([]),
   explanation: z.string().min(1),
   next_recommended_skill: z.array(z.string().min(1)).default([])
@@ -1452,9 +1457,22 @@ function normalizeAssetExtractionPayload(input: {
       asset.expiry_date =
         extractionProfile === "resume" ? null : sanitizeIssueDate(asset.expiry_date);
       asset.validity_status = asset.validity_status ?? "unknown";
-      if (!Array.isArray(asset.reusable_scenarios)) {
-        asset.reusable_scenarios = [];
-      }
+      asset.agent_tags = sanitizeAgentTags({
+        material_type: typeof asset.material_type === "string" ? asset.material_type : null,
+        title: typeof asset.title === "string" ? asset.title : null,
+        normalized_summary:
+          typeof asset.normalized_summary === "string" ? asset.normalized_summary : null,
+        confidence: typeof asset.confidence === "number" ? asset.confidence : null,
+        review_status:
+          typeof asset.review_status === "string" ? asset.review_status : null,
+        reusable_scenarios: Array.isArray(asset.reusable_scenarios)
+          ? asset.reusable_scenarios
+          : [],
+        agent_tags: Array.isArray(asset.agent_tags) ? asset.agent_tags : []
+      });
+      asset.reusable_scenarios = deriveReusableScenariosFromAgentTags(
+        Array.isArray(asset.agent_tags) ? asset.agent_tags : []
+      );
       asset.sensitivity_level =
         asset.sensitivity_level ?? defaultSensitivityLevel(asset.material_type);
       const sourceFiles = Array.isArray(asset.source_files) ? asset.source_files : [];
@@ -1487,6 +1505,10 @@ function normalizeAssetExtractionPayload(input: {
         ownerProfile: input.ownerProfile ?? null,
         triageFallback
       });
+      asset.agent_tags = sanitizeAgentTags(asset);
+      asset.reusable_scenarios = deriveReusableScenariosFromAgentTags(
+        Array.isArray(asset.agent_tags) ? asset.agent_tags : []
+      );
       asset.last_verified_at =
         asset.review_status === "reviewed" ? new Date().toISOString() : null;
       const parsedAsset = assetCardSchema.safeParse(asset);
@@ -2457,6 +2479,7 @@ function summarizeAsset(asset: AssetCard) {
     holder_name: asset.holder_name,
     issuer_name: asset.issuer_name,
     issue_date: asset.issue_date,
+    agent_tags: asset.agent_tags,
     reusable_scenarios: asset.reusable_scenarios,
     confidence: asset.confidence,
     normalized_summary: asset.normalized_summary
@@ -3137,7 +3160,14 @@ export async function runBuildAssetLibrarySkill(input: {
           at_most_one_asset_per_file: true,
           schema_version_must_be: "1.0",
           default_validity_status_when_uncertain: "unknown",
-          prefer_short_title_and_summary: true
+          prefer_short_title_and_summary: true,
+          agent_tags: {
+            required: true,
+            min_count: 4,
+            max_count: 12,
+            allowed_prefixes: ["doc", "use", "entity", "risk"],
+            lowercase_ascii_only: true
+          }
         }
       },
       outputSchema: batchAssetExtractionSchema,
@@ -3158,6 +3188,8 @@ export async function runBuildAssetLibrarySkill(input: {
         "If asset_card is present, include every required asset_card field.",
         "If you cannot produce a truthful canonical asset_card, return asset_card as null and provide skip_reason.",
         "Do not omit schema_version, title, validity_status, sensitivity_level, source_files, or normalized_summary.",
+        "If asset_card is present, include agent_tags using only doc:/use:/entity:/risk: namespaces.",
+        "Do not emit unknown, long sentences, or free-text labels in agent_tags.",
         "For resume inputs, material_type must be experience and issuer/date fields must be null.",
         "For public/team evidence, only keep the asset if it can be mapped uniquely to the library owner.",
         "Do not keep team names or public notices as holder_name values."
@@ -3426,18 +3458,36 @@ export async function normalizeQueryAssetsRequest(input: {
     taskInput: {
       natural_language_query: input.natural_language_query,
       allowed_material_types: ["proof", "experience", "agreement", "finance", "rights"],
-      allowed_scenarios: [
-        "summer_internship_application",
-        "scholarship_application",
-        "renew_contract",
-        "expense_reimbursement"
+      allowed_tag_prefixes: ["doc", "use", "entity", "risk"],
+      common_tags: [
+        "doc:resume",
+        "doc:transcript",
+        "doc:certificate",
+        "doc:student_status",
+        "entity:language_certificate",
+        "entity:transcript",
+        "entity:student_status_certificate",
+        "entity:internship_experience",
+        "entity:award_certificate",
+        "use:summer_internship_application",
+        "use:scholarship_application",
+        "use:renew_contract",
+        "use:expense_reimbursement",
+        "risk:needs_review"
       ]
     },
     outputSchema: normalizedQuerySchema,
     maxRetries: input.maxRetries,
     eventStage: "query_assets",
     decisionType: "query_normalization",
-    onEvent: input.onEvent
+    onEvent: input.onEvent,
+    extraSystemPromptLines: [
+      "Normalize into deterministic retrieval filters for hybrid search.",
+      "Use semantic_query for the compact intent sentence; do not repeat the full user query.",
+      "Prefer tag_filters_any/tag_filters_all over reusable_scenario.",
+      "Only emit lowercase ASCII tags with doc:/use:/entity:/risk: prefixes.",
+      "Output the JSON object immediately and stop."
+    ]
   });
 }
 

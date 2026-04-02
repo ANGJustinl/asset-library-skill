@@ -15,6 +15,7 @@
     "@caixu/executor-profiles": "workspace:*",
     "@caixu/rules": "workspace:*",
     "@caixu/storage": "workspace:*",
+    "@huggingface/transformers": "4.0.0",
     "@modelcontextprotocol/sdk": "^1.28.0",
     "zod": "^4.3.6"
   },

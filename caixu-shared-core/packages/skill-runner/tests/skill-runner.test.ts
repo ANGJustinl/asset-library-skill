@@ -82,6 +82,12 @@ describe("@caixu/skill-runner", () => {
                     issue_date: null,
                     expiry_date: null,
                     validity_status: "long_term",
+                    agent_tags: [
+                      "doc:resume",
+                      "entity:experience_record",
+                      "use:summer_internship_application",
+                      "risk:auto"
+                    ],
                     reusable_scenarios: ["summer_internship_application"],
                     sensitivity_level: "medium",
                     source_files: [
@@ -119,6 +125,12 @@ describe("@caixu/skill-runner", () => {
                   issue_date: null,
                   expiry_date: null,
                   validity_status: "long_term",
+                  agent_tags: [
+                    "doc:resume",
+                    "entity:experience_record",
+                    "use:summer_internship_application",
+                    "risk:auto"
+                  ],
                   reusable_scenarios: ["summer_internship_application"],
                   sensitivity_level: "medium",
                   source_files: [
@@ -284,6 +296,12 @@ describe("@caixu/skill-runner", () => {
                 issue_date: null,
                 expiry_date: null,
                 validity_status: "long_term",
+                agent_tags: [
+                  "doc:resume",
+                  "entity:experience_record",
+                  "use:summer_internship_application",
+                  "risk:auto"
+                ],
                 reusable_scenarios: ["summer_internship_application"],
                 sensitivity_level: "medium",
                 source_files: [
@@ -699,6 +717,12 @@ describe("@caixu/skill-runner", () => {
           issue_date: null,
           expiry_date: null,
           validity_status: "unknown",
+          agent_tags: [
+            "doc:resume",
+            "entity:experience_record",
+            "use:general_reference",
+            "risk:reviewed"
+          ],
           reusable_scenarios: [],
           sensitivity_level: "medium",
           source_files: [
@@ -816,6 +840,12 @@ describe("@caixu/skill-runner", () => {
           issue_date: null,
           expiry_date: null,
           validity_status: "unknown",
+          agent_tags: [
+            "doc:resume",
+            "entity:experience_record",
+            "use:general_reference",
+            "risk:reviewed"
+          ],
           reusable_scenarios: [],
           sensitivity_level: "medium",
           source_files: [
@@ -933,7 +963,10 @@ describe("@caixu/skill-runner", () => {
       content: JSON.stringify({
         material_types: ["proof"],
         keyword: null,
-        reusable_scenario: "summer_internship_application",
+        semantic_query: "暑期实习申请可复用的证明材料",
+        tag_filters_any: ["use:summer_internship_application", "doc:proof"],
+        tag_filters_all: [],
+        limit: 12,
         validity_statuses: [],
         explanation: "Mapped proof-like internship materials to deterministic filters.",
         next_recommended_skill: ["check-lifecycle"]
@@ -948,7 +981,11 @@ describe("@caixu/skill-runner", () => {
 
     expect(result.status).toBe("success");
     expect(result.data?.material_types).toEqual(["proof"]);
-    expect(result.data?.reusable_scenario).toBe("summer_internship_application");
+    expect(result.data?.semantic_query).toBe("暑期实习申请可复用的证明材料");
+    expect(result.data?.tag_filters_any).toEqual([
+      "use:summer_internship_application",
+      "doc:proof"
+    ]);
   });
 
   it("uses compact route-decision prompt context for ingest-materials", async () => {
@@ -1210,6 +1247,12 @@ describe("@caixu/skill-runner", () => {
                   issue_date: "2026-03-01",
                   expiry_date: null,
                   validity_status: "long_term",
+                  agent_tags: [
+                    "doc:certificate",
+                    "entity:award_certificate",
+                    "use:summer_internship_application",
+                    "risk:auto"
+                  ],
                   reusable_scenarios: ["summer_internship_application"],
                   sensitivity_level: "medium",
                   source_files: [

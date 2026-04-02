@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import {
+  buildAssetSearchText,
   type ExtractParserTextData,
   type ExtractVisualTextData,
   type ListLocalFilesData,
@@ -17,22 +18,147 @@ import {
   type PipelineRunData,
   type PipelineStep,
   type ParsedFile,
+  type QueryAssetsData,
   type ReadLocalTextFileData,
+  type ReindexLibrarySearchData,
   type RenderPdfPagesData,
   type ReviewQueueData,
   type ReviewStatus,
+  deriveReusableScenariosFromAgentTags,
+  sanitizeAgentTags,
   makeToolResult
 } from "@caixu/contracts";
 import { getSubmissionProfile } from "@caixu/executor-profiles";
 import { getRuleProfileBundle } from "@caixu/rules";
 import { openCaixuStorage } from "@caixu/storage";
+import {
+  createLocalSearchEmbedder,
+  type SearchEmbedder
+} from "./search-embedder.js";
 
 export function defaultDbPath(): string {
   return process.env.CAIXU_SQLITE_PATH ?? join(process.cwd(), "data", "caixu.sqlite");
 }
 
-export function createDataService(dbPath = defaultDbPath()) {
+type CreateDataServiceOptions = {
+  searchEmbedder?: SearchEmbedder;
+  embeddingModelId?: string;
+};
+
+type RankedHit = {
+  asset_id: string;
+  score: number;
+};
+
+const defaultRrfK = 60;
+
+function unique<T>(values: T[]): T[] {
+  return [...new Set(values)];
+}
+
+function rrfMergeRankedIds(lists: string[][], limit: number): string[] {
+  const scores = new Map<string, number>();
+  for (const ids of lists) {
+    ids.forEach((assetId, index) => {
+      scores.set(assetId, (scores.get(assetId) ?? 0) + 1 / (defaultRrfK + index + 1));
+    });
+  }
+
+  return [...scores.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([assetId]) => assetId);
+}
+
+function filterMergedAssets(libraryId: string, assets: AssetCard[], mergedAssets: MergedAsset[]) {
+  const matchedIds = new Set(assets.map((asset) => asset.asset_id));
+  return mergedAssets.filter((merged) => {
+    if (matchedIds.has(merged.selected_asset_id) || matchedIds.has(merged.canonical_asset_id)) {
+      return true;
+    }
+    return merged.superseded_asset_ids.some((assetId) => matchedIds.has(assetId));
+  });
+}
+
+export function createDataService(
+  dbPath = defaultDbPath(),
+  options: CreateDataServiceOptions = {}
+) {
   const storage = openCaixuStorage(dbPath);
+  const searchEmbedder =
+    options.searchEmbedder ??
+    createLocalSearchEmbedder({
+      modelId: options.embeddingModelId
+    });
+  const embeddingModelId = options.embeddingModelId ?? searchEmbedder.modelId;
+
+  function syncSearchIndexForAssets(
+    libraryId: string,
+    assets: AssetCard[]
+  ): { data: ReindexLibrarySearchData; warnings: string[] } {
+    const warnings: string[] = [];
+    const activeAssets = assets.filter((asset) => asset.asset_state === "active");
+    const archivedIds = assets
+      .filter((asset) => asset.asset_state === "archived")
+      .map((asset) => asset.asset_id);
+
+    if (archivedIds.length) {
+      storage.removeAssetSearchIndex(archivedIds);
+    }
+
+    const searchableAssets = activeAssets
+      .map((asset) => {
+        const normalized = {
+          ...asset,
+          agent_tags: sanitizeAgentTags(asset),
+          reusable_scenarios: deriveReusableScenariosFromAgentTags(
+            sanitizeAgentTags(asset)
+          )
+        } satisfies AssetCard;
+        const searchText = buildAssetSearchText(normalized);
+        return { asset: normalized, searchText };
+      })
+      .filter((item) => item.searchText.trim().length > 0);
+
+    const skippedAssets = archivedIds.length + (activeAssets.length - searchableAssets.length);
+    let embeddings: Array<number[] | null> = searchableAssets.map(() => null);
+
+    if (searchableAssets.length > 0) {
+      try {
+        const vectors = searchEmbedder.embedTexts(
+          searchableAssets.map((item) => item.searchText)
+        );
+        embeddings = searchableAssets.map((_, index) => vectors[index] ?? null);
+      } catch (error) {
+        warnings.push(
+          `Embedding generation failed; falling back to FTS/tag search only: ${
+            error instanceof Error ? error.message : "unknown embedding error"
+          }`
+        );
+      }
+    }
+
+    const indexed = storage.upsertAssetSearchIndex({
+      library_id: libraryId,
+      assets: searchableAssets.map((item, index) => ({
+        asset_id: item.asset.asset_id,
+        title: item.asset.title,
+        normalized_summary: item.asset.normalized_summary,
+        agent_tags: item.asset.agent_tags,
+        search_text: item.searchText,
+        embedding: embeddings[index] ?? null,
+        model: embeddingModelId
+      }))
+    });
+
+    return {
+      data: {
+        ...indexed,
+        skipped_assets: indexed.skipped_assets + skippedAssets
+      },
+      warnings
+    };
+  }
 
   return {
     close: () => storage.close(),
@@ -142,22 +268,115 @@ export function createDataService(dbPath = defaultDbPath()) {
     },
     upsertAssetCards(input: { library_id: string; asset_cards: AssetCard[] }) {
       const assetCards = storage.upsertAssetCards(input.library_id, input.asset_cards);
-      return makeToolResult("success", {
-        library_id: input.library_id,
-        asset_cards: assetCards
-      });
+      const indexed = syncSearchIndexForAssets(input.library_id, assetCards);
+      return makeToolResult(
+        indexed.warnings.length > 0 ? "partial" : "success",
+        {
+          library_id: input.library_id,
+          asset_cards: assetCards
+        },
+        { warnings: indexed.warnings }
+      );
     },
     queryAssets(input: {
       library_id: string;
       material_types?: string[];
       keyword?: string;
       reusable_scenario?: string;
+      semantic_query?: string;
+      tag_filters_any?: string[];
+      tag_filters_all?: string[];
       validity_statuses?: string[];
       asset_states?: AssetState[];
       review_statuses?: ReviewStatus[];
+      limit?: number;
     }) {
       try {
-        return makeToolResult("success", storage.queryAssets(input));
+        const compatibilityTags = input.reusable_scenario
+          ? [`use:${input.reusable_scenario}`]
+          : [];
+        const tagFiltersAny = unique([
+          ...(input.tag_filters_any ?? []),
+          ...compatibilityTags
+        ]);
+        const usesEnhancedQuery =
+          Boolean(input.semantic_query?.trim()) ||
+          tagFiltersAny.length > 0 ||
+          Boolean(input.tag_filters_all?.length);
+
+        if (!usesEnhancedQuery) {
+          return makeToolResult("success", storage.queryAssets(input));
+        }
+
+        const base = storage.queryAssets({
+          library_id: input.library_id,
+          material_types: input.material_types,
+          validity_statuses: input.validity_statuses,
+          asset_states: input.asset_states,
+          review_statuses: input.review_statuses
+        });
+
+        const allowedIds = base.asset_cards.map((asset) => asset.asset_id);
+        if (allowedIds.length === 0) {
+          return makeToolResult("success", {
+            library_id: input.library_id,
+            asset_cards: [],
+            merged_assets: []
+          } satisfies QueryAssetsData);
+        }
+        const limit = input.limit && input.limit > 0 ? input.limit : 20;
+        const rankedLists: string[][] = [];
+        const warnings: string[] = [];
+
+        const lexicalQuery = input.semantic_query?.trim() || input.keyword?.trim() || "";
+        if (lexicalQuery) {
+          rankedLists.push(
+            storage.searchAssetIdsByFts({
+              library_id: input.library_id,
+              query: lexicalQuery,
+              limit,
+              allowed_asset_ids: allowedIds
+            })
+          );
+        }
+
+        if (tagFiltersAny.length > 0 || (input.tag_filters_all?.length ?? 0) > 0) {
+          rankedLists.push(
+            storage.searchAssetIdsByTags({
+              library_id: input.library_id,
+              tag_filters_any: tagFiltersAny,
+              tag_filters_all: input.tag_filters_all,
+              limit,
+              allowed_asset_ids: allowedIds
+            })
+          );
+        }
+
+        const primaryIds = rrfMergeRankedIds(
+          rankedLists.filter((ids) => ids.length > 0),
+          limit
+        );
+
+        const matchedAssets =
+          primaryIds.length > 0
+            ? storage.getAssetCardsByIds(input.library_id, primaryIds)
+            : [];
+
+        const mergedAssets = filterMergedAssets(
+          input.library_id,
+          matchedAssets,
+          storage.getMergedAssets(input.library_id)
+        );
+
+        return makeToolResult<QueryAssetsData>(
+          warnings.length > 0 ? "partial" : "success",
+          {
+            library_id: input.library_id,
+            asset_cards: matchedAssets,
+            merged_assets: mergedAssets
+          },
+          { warnings }
+        );
       } catch (error) {
         return makeToolResult("failed", undefined, {
           errors: [
@@ -192,6 +411,7 @@ export function createDataService(dbPath = defaultDbPath()) {
           | "issue_date"
           | "expiry_date"
           | "validity_status"
+          | "agent_tags"
           | "reusable_scenarios"
           | "sensitivity_level"
           | "normalized_summary"
@@ -201,45 +421,69 @@ export function createDataService(dbPath = defaultDbPath()) {
       >;
     }) {
       const result = storage.patchAssetCard(input.library_id, input.asset_id, input.patch);
+      const warnings =
+        result?.asset_card != null
+          ? syncSearchIndexForAssets(input.library_id, [result.asset_card]).warnings
+          : [];
       return makeToolResult<PatchAssetCardData | undefined>(
-        result ? "success" : "failed",
+        result ? (warnings.length > 0 ? "partial" : "success") : "failed",
         result
           ? {
               library_id: input.library_id,
               asset_card: result.asset_card,
               change_event: result.change_event
             }
-          : undefined
+          : undefined,
+        { warnings }
       );
     },
     archiveAsset(input: { library_id: string; asset_id: string }) {
       const result = storage.setAssetState(input.library_id, input.asset_id, "archived");
+      const warnings =
+        result?.asset_card != null
+          ? syncSearchIndexForAssets(input.library_id, [result.asset_card]).warnings
+          : [];
       return makeToolResult<PatchAssetCardData | undefined>(
-        result ? "success" : "failed",
+        result ? (warnings.length > 0 ? "partial" : "success") : "failed",
         result
           ? {
               library_id: input.library_id,
               asset_card: result.asset_card,
               change_event: result.change_event
             }
-          : undefined
+          : undefined,
+        { warnings }
       );
     },
     restoreAsset(input: { library_id: string; asset_id: string }) {
       const result = storage.setAssetState(input.library_id, input.asset_id, "active");
+      const warnings =
+        result?.asset_card != null
+          ? syncSearchIndexForAssets(input.library_id, [result.asset_card]).warnings
+          : [];
       return makeToolResult<PatchAssetCardData | undefined>(
-        result ? "success" : "failed",
+        result ? (warnings.length > 0 ? "partial" : "success") : "failed",
         result
           ? {
               library_id: input.library_id,
               asset_card: result.asset_card,
               change_event: result.change_event
             }
-          : undefined
+          : undefined,
+        { warnings }
       );
     },
     listReviewQueue(input: { library_id: string }) {
       return makeToolResult<ReviewQueueData>("success", storage.listReviewQueue(input.library_id));
+    },
+    reindexLibrarySearch(input: { library_id: string }) {
+      const assetCards = storage.listAssetCards(input.library_id);
+      const indexed = syncSearchIndexForAssets(input.library_id, assetCards);
+      return makeToolResult<ReindexLibrarySearchData>(
+        indexed.warnings.length > 0 ? "partial" : "success",
+        indexed.data,
+        { warnings: indexed.warnings }
+      );
     },
     writeLifecycleRun(input: {
       run_id: string;
@@ -300,6 +544,120 @@ export function createDataService(dbPath = defaultDbPath()) {
             {
               code: "RULE_PROFILE_NOT_SUPPORTED",
               message: error instanceof Error ? error.message : "Unknown rule profile error",
+              retryable: false
+            }
+          ]
+        });
+      }
+    },
+    queryAssetsVector(input: {
+      library_id: string;
+      semantic_query: string;
+      material_types?: string[];
+      reusable_scenario?: string;
+      tag_filters_any?: string[];
+      tag_filters_all?: string[];
+      validity_statuses?: string[];
+      asset_states?: AssetState[];
+      review_statuses?: ReviewStatus[];
+      limit?: number;
+    }) {
+      const semanticQuery = input.semantic_query.trim();
+      if (!semanticQuery) {
+        return makeToolResult("failed", undefined, {
+          errors: [
+            {
+              code: "QUERY_ASSETS_VECTOR_MISSING_QUERY",
+              message:
+                "query_assets_vector requires a non-empty semantic_query.",
+              retryable: false
+            }
+          ]
+        });
+      }
+
+      try {
+        const compatibilityTags = input.reusable_scenario
+          ? [`use:${input.reusable_scenario}`]
+          : [];
+        const tagFiltersAny = unique([
+          ...(input.tag_filters_any ?? []),
+          ...compatibilityTags
+        ]);
+        const limit = input.limit && input.limit > 0 ? input.limit : 20;
+
+        const base = storage.queryAssets({
+          library_id: input.library_id,
+          material_types: input.material_types,
+          validity_statuses: input.validity_statuses,
+          asset_states: input.asset_states,
+          review_statuses: input.review_statuses
+        });
+
+        let candidates = base.asset_cards;
+        if (tagFiltersAny.length > 0 || (input.tag_filters_all?.length ?? 0) > 0) {
+          const hasAnyTags =
+            tagFiltersAny.length === 0 ||
+            candidates.some((asset) =>
+              tagFiltersAny.some((tag) => asset.agent_tags.includes(tag))
+            );
+          if (hasAnyTags) {
+            candidates = candidates.filter((asset) => {
+              const matchesAny =
+                tagFiltersAny.length === 0 ||
+                tagFiltersAny.some((tag) => asset.agent_tags.includes(tag));
+              const matchesAll =
+                (input.tag_filters_all?.length ?? 0) === 0 ||
+                (input.tag_filters_all ?? []).every((tag) =>
+                  asset.agent_tags.includes(tag)
+                );
+              return matchesAny && matchesAll;
+            });
+          }
+        }
+
+        const allowedIds = candidates.map((asset) => asset.asset_id);
+        if (allowedIds.length === 0) {
+          return makeToolResult<QueryAssetsData>("success", {
+            library_id: input.library_id,
+            asset_cards: [],
+            merged_assets: []
+          });
+        }
+
+        const [queryEmbedding] = searchEmbedder.embedTexts([semanticQuery]);
+        const vectorIds = storage.searchAssetIdsByVector({
+          library_id: input.library_id,
+          query_embedding: queryEmbedding ?? [],
+          limit,
+          allowed_asset_ids: allowedIds
+        });
+
+        const matchedAssets =
+          vectorIds.length > 0
+            ? storage.getAssetCardsByIds(input.library_id, vectorIds)
+            : [];
+
+        const mergedAssets = filterMergedAssets(
+          input.library_id,
+          matchedAssets,
+          storage.getMergedAssets(input.library_id)
+        );
+
+        return makeToolResult<QueryAssetsData>("success", {
+          library_id: input.library_id,
+          asset_cards: matchedAssets,
+          merged_assets: mergedAssets
+        });
+      } catch (error) {
+        return makeToolResult("failed", undefined, {
+          errors: [
+            {
+              code: "QUERY_ASSETS_VECTOR_FAILED",
+              message:
+                error instanceof Error
+                  ? error.message
+                  : "Unknown vector query failure",
               retryable: false
             }
           ]

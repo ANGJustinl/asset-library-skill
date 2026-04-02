@@ -49,19 +49,19 @@ function mockSkillModelClient(libraryId, profile) {
             {
               file_id: "file_transcript_txt",
               include_in_library: true,
-              document_role: "proof",
+              document_role: "personal_proof",
               reason: null
             },
             {
               file_id: "file_student_status_certificate_txt",
               include_in_library: true,
-              document_role: "proof",
+              document_role: "personal_proof",
               reason: null
             },
             {
               file_id: "file_cet6_score_report_txt",
               include_in_library: true,
-              document_role: "proof",
+              document_role: "personal_proof",
               reason: null
             }
           ]
@@ -87,6 +87,12 @@ function mockSkillModelClient(libraryId, profile) {
                 issue_date: "2026-03-01",
                 expiry_date: null,
                 validity_status: "long_term",
+                agent_tags: [
+                  "doc:transcript",
+                  "entity:transcript",
+                  "use:summer_internship_application",
+                  "risk:auto"
+                ],
                 reusable_scenarios: ["summer_internship_application"],
                 sensitivity_level: "medium",
                 source_files: [
@@ -115,6 +121,12 @@ function mockSkillModelClient(libraryId, profile) {
                 issue_date: "2026-03-15",
                 expiry_date: "2026-04-20",
                 validity_status: "expiring",
+                agent_tags: [
+                  "doc:student_status",
+                  "entity:student_status_certificate",
+                  "use:summer_internship_application",
+                  "risk:needs_review"
+                ],
                 reusable_scenarios: ["summer_internship_application"],
                 sensitivity_level: "medium",
                 source_files: [
@@ -143,6 +155,12 @@ function mockSkillModelClient(libraryId, profile) {
                 issue_date: "2025-12-20",
                 expiry_date: null,
                 validity_status: "long_term",
+                agent_tags: [
+                  "doc:certificate",
+                  "entity:language_certificate",
+                  "use:summer_internship_application",
+                  "risk:auto"
+                ],
                 reusable_scenarios: ["summer_internship_application"],
                 sensitivity_level: "medium",
                 source_files: [
@@ -355,7 +373,18 @@ function mockSkillModelClient(libraryId, profile) {
 async function main() {
   const dbPath = join(mkdtempSync(join(tmpdir(), "caixu-agent-smoke-db-")), "caixu.sqlite");
   const outputDir = mkdtempSync(join(tmpdir(), "caixu-agent-smoke-out-"));
-  const service = createDataService(dbPath);
+  const service = createDataService(dbPath, {
+    searchEmbedder: {
+      modelId: "mock-multilingual-minilm",
+      dimensions: 384,
+      embedTexts(texts) {
+        return texts.map((text) => {
+          const base = [...text].reduce((sum, char) => sum + char.charCodeAt(0), 0) % 997;
+          return Array.from({ length: 384 }, (_, index) => ((base + index) % 101) / 100);
+        });
+      }
+    }
+  });
 
   try {
     const libraryResult = service.createOrLoadLibrary({
@@ -410,6 +439,17 @@ async function main() {
       "failed to persist build audit"
     );
 
+    const lifecycleCandidates = service.queryAssets({
+      library_id: libraryId,
+      semantic_query: profile.scene_summary,
+      tag_filters_any: ["use:summer_internship_application"],
+      limit: 20
+    });
+    invariant(
+      lifecycleCandidates.status === "success" || lifecycleCandidates.status === "partial",
+      "failed to retrieve lifecycle candidates"
+    );
+
     const lifecycleDecision = await runCheckLifecycleSkill({
       skillDir: join(repoRoot, "caixu-check-lifecycle"),
       library_id: libraryId,
@@ -417,7 +457,7 @@ async function main() {
       as_of_date: "2026-03-29",
       window_days: 60,
       profile,
-      assets,
+      assets: lifecycleCandidates.data?.asset_cards ?? [],
       modelClient
     });
     invariant(lifecycleDecision.status === "success", "check-lifecycle skill failed");

@@ -36,6 +36,12 @@ function createFixtureLibrary(storage) {
         issue_date: null,
         expiry_date: null,
         validity_status: "unknown",
+        agent_tags: [
+          "doc:resume",
+          "entity:experience_record",
+          "use:job_application",
+          "risk:needs_review"
+        ],
         reusable_scenarios: [],
         sensitivity_level: "medium",
         source_files: [
@@ -62,6 +68,12 @@ function createFixtureLibrary(storage) {
         issue_date: "2026-03-01",
         expiry_date: null,
         validity_status: "long_term",
+        agent_tags: [
+          "doc:transcript",
+          "entity:transcript",
+          "use:job_application",
+          "risk:auto"
+        ],
         reusable_scenarios: ["job_application"],
         sensitivity_level: "medium",
         source_files: [

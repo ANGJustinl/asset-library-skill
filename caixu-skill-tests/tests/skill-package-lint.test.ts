@@ -131,8 +131,11 @@ describe("skill package lint", () => {
     expect(rootSkill).toBeTruthy();
     const skillText = read(rootSkill!.skillFile);
     const references = referencedRelativePaths(skillText);
+    const installPath = join(repoRoot, "references", "install.md");
 
     expect(rootSkill!.packageType).toBe("root");
+    expect(existsSync(installPath), `${installPath} should exist`).toBe(true);
+    expect(skillText).toContain("references/install.md");
     expect(references.every((reference) => reference.startsWith("references/"))).toBe(true);
     expect(skillText).not.toContain("(docs/");
     expect(skillText).not.toContain("(scripts/");

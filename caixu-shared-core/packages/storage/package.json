@@ -16,6 +16,7 @@
     "test": "vitest run tests --exclude '**/dist/**'"
   },
   "dependencies": {
-    "@caixu/contracts": "workspace:*"
+    "@caixu/contracts": "workspace:*",
+    "sqlite-vec": "0.1.9"
   }
 }

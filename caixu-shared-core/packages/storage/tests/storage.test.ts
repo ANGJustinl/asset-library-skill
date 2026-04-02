@@ -65,6 +65,12 @@ describe("@caixu/storage", () => {
         issue_date: "2026-03-01",
         expiry_date: null,
         validity_status: "long_term",
+        agent_tags: [
+          "doc:transcript",
+          "entity:transcript",
+          "use:summer_internship_application",
+          "risk:auto"
+        ],
         reusable_scenarios: ["summer_internship_application"],
         sensitivity_level: "medium",
         source_files: [
@@ -132,7 +138,8 @@ describe("@caixu/storage", () => {
     storage.upsertMergedAssets(library.library_id, mergedAssets);
     const query = storage.queryAssets({
       library_id: library.library_id,
-      keyword: "Transcript"
+      keyword: "Transcript",
+      tag_filters_any: ["use:summer_internship_application"]
     });
 
     expect(query.asset_cards).toHaveLength(1);
@@ -156,6 +163,12 @@ describe("@caixu/storage", () => {
         issue_date: null,
         expiry_date: null,
         validity_status: "unknown",
+        agent_tags: [
+          "doc:resume",
+          "entity:experience_record",
+          "use:job_application",
+          "risk:needs_review"
+        ],
         reusable_scenarios: [],
         sensitivity_level: "medium",
         source_files: [

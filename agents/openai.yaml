@@ -1,4 +1,4 @@
 interface:
   display_name: "Caixu Mainline"
-  short_description: "Route end-to-end material workflows to the right current phase skill"
-  default_prompt: "Use $caixu-skill as the main entry for 材序 when the user describes the whole workflow or does not know which phase to run, route only to the current child skill, explain the stage boundary and next step, and do not directly run OCR, database, packaging, or browser actions."
+  short_description: "Route setup, hybrid retrieval readiness, and end-to-end material workflows to the right phase skill"
+  default_prompt: "Use $caixu-skill as the main entry for 材序 when the user describes the whole workflow, does not know which phase to run, or may not have the environment installed yet. If keys, AutoClaw profile, MCP registration, hybrid retrieval config, or runtime setup are missing, read references/install.md first and guide setup before routing to a phase skill. Do not directly run OCR, database, vector indexing, packaging, or browser actions."

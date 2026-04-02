@@ -20,6 +20,7 @@ import {
   pipelineStepSchema,
   parsedFileSchema,
   queryAssetsDataSchema,
+  reindexLibrarySearchDataSchema,
   reviewQueueDataSchema,
   reviewStatusSchema,
   ruleProfileSchema,
@@ -277,20 +278,53 @@ server.registerTool(
 server.registerTool(
   "query_assets",
   {
-    description: "Query assets and merged assets from the library.",
+    description:
+      "Query assets and merged assets from the library using structural filters, agent tags, and FTS. This is the default precise retrieval path.",
     inputSchema: {
       library_id: z.string().min(1),
       material_types: z.array(z.string().min(1)).optional(),
       keyword: z.string().optional(),
       reusable_scenario: z.string().optional(),
+      semantic_query: z.string().optional(),
+      tag_filters_any: z.array(z.string().min(1)).optional(),
+      tag_filters_all: z.array(z.string().min(1)).optional(),
       validity_statuses: z.array(z.string().min(1)).optional(),
       asset_states: z.array(assetStateSchema).optional(),
-      review_statuses: z.array(reviewStatusSchema).optional()
+      review_statuses: z.array(reviewStatusSchema).optional(),
+      limit: z.number().int().positive().optional()
     },
     outputSchema: toolResultSchema(queryAssetsDataSchema).shape
   },
   async (input) => {
     const result = service.queryAssets(input);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      structuredContent: result
+    };
+  }
+);
+
+server.registerTool(
+  "query_assets_vector",
+  {
+    description:
+      "Run optional semantic vector retrieval for similar or related assets. Use only when the user explicitly asks for semantic expansion, similar materials, or related materials.",
+    inputSchema: {
+      library_id: z.string().min(1),
+      semantic_query: z.string().min(1),
+      material_types: z.array(z.string().min(1)).optional(),
+      reusable_scenario: z.string().optional(),
+      tag_filters_any: z.array(z.string().min(1)).optional(),
+      tag_filters_all: z.array(z.string().min(1)).optional(),
+      validity_statuses: z.array(z.string().min(1)).optional(),
+      asset_states: z.array(assetStateSchema).optional(),
+      review_statuses: z.array(reviewStatusSchema).optional(),
+      limit: z.number().int().positive().optional()
+    },
+    outputSchema: toolResultSchema(queryAssetsDataSchema).shape
+  },
+  async (input) => {
+    const result = service.queryAssetsVector(input);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
       structuredContent: result
@@ -313,6 +347,7 @@ server.registerTool(
           issue_date: z.string().nullable().optional(),
           expiry_date: z.string().nullable().optional(),
           validity_status: assetCardSchema.shape.validity_status.optional(),
+          agent_tags: z.array(z.string().min(1)).optional(),
           reusable_scenarios: z.array(z.string().min(1)).optional(),
           sensitivity_level: assetCardSchema.shape.sensitivity_level.optional(),
           normalized_summary: z.string().min(1).optional(),
@@ -383,6 +418,24 @@ server.registerTool(
   },
   async ({ library_id }) => {
     const result = service.listReviewQueue({ library_id });
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      structuredContent: result
+    };
+  }
+);
+
+server.registerTool(
+  "reindex_library_search",
+  {
+    description: "Rebuild FTS, tag, and vector search indexes for a library.",
+    inputSchema: {
+      library_id: z.string().min(1)
+    },
+    outputSchema: toolResultSchema(reindexLibrarySearchDataSchema).shape
+  },
+  async ({ library_id }) => {
+    const result = service.reindexLibrarySearch({ library_id });
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
       structuredContent: result
