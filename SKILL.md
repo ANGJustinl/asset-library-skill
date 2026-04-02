@@ -1,9 +1,9 @@
 ---
 name: caixu-skill
-description: "Main entry skill for 材序. Use when the user expresses the overall end-to-end intent in one request, including “把这些材料建成资产库”“列出未来 60 天需要续办或补办的事项”“生成暑期实习申请材料包”, when the user wants to search materials by natural language but is unsure whether the local retrieval environment is ready, when the user is unsure which phase skill to run, or when the environment may not be installed yet. This skill routes only to the current child skill, sends first-time installation agents to references/install.md when keys, retrieval config, or runtime setup are missing, explains stage boundaries and next steps, and does not directly call MCP tools, extract files, build packages, or submit forms."
+description: "Asset Library Skill. Use when the user expresses the overall end-to-end intent in one request, including “把这些材料建成资产库”“列出未来 60 天需要续办或补办的事项”“生成暑期实习申请材料包”, when the user wants to search materials by natural language but is unsure whether the local retrieval environment is ready, when the user is unsure which phase skill to run, or when the environment may not be installed yet. This skill routes only to the current child skill, sends first-time installation agents to references/install.md when keys, retrieval config, or runtime setup are missing, explains stage boundaries and next steps, and does not directly call MCP tools, extract files, build packages, or submit forms."
 ---
 
-# caixu-skill
+# Asset Library Skill
 
 在用户把整条主线一次性说出来，或还不确定应该先跑哪个阶段 skill 时，先使用这个主入口 skill。
 

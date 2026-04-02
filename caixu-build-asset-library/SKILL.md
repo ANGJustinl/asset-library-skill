@@ -1,9 +1,9 @@
 ---
 name: caixu-build-asset-library
-description: "Use when the user wants to convert parsed materials into asset cards and a queryable library at the asset-build stage, including “建资产库”“生成资产卡”“去重整理版本”. Prefer caixu-skill when the user asks for the full end-to-end mainline or is unsure which stage to run. This skill creates a build_asset_library pipeline run, reads parsed files from caixu-data-mcp, extracts canonical asset cards from trustworthy parsed text, merges likely duplicate versions conservatively, persists assets and merged groups, and completes the pipeline run with library_id. Do not use it for querying, lifecycle judgment, package creation, or submission."
+description: "Build Personal Asset Library. Use when the user wants to convert parsed materials into asset cards and a queryable library at the asset-build stage, including “建资产库”“生成资产卡”“去重整理版本”. Prefer caixu-skill when the user asks for the full end-to-end mainline or is unsure which stage to run. This skill creates a build_asset_library pipeline run, reads parsed files from caixu-data-mcp, extracts canonical asset cards from trustworthy parsed text, merges likely duplicate versions conservatively, persists assets and merged groups, and completes the pipeline run with library_id. Do not use it for querying, lifecycle judgment, package creation, or submission."
 ---
 
-# build-asset-library
+# Build Personal Asset Library
 
 在用户要“建资产库”“生成资产卡”“去重整理版本”时使用这个 skill。
 

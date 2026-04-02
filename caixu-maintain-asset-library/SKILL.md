@@ -1,9 +1,9 @@
 ---
 name: caixu-maintain-asset-library
-description: "Use when the user wants to inspect, review, patch, archive, restore, or verify a personal material asset library after initial build, including “看库概览”“修一条资产”“归档这条不该进库的材料”“看待复核队列”. Prefer caixu-skill when the user asks for the full end-to-end mainline or is unsure which stage to run. This skill loads library overviews and review queues from caixu-data-mcp, applies minimal maintenance actions such as patching or archiving one asset at a time, and re-checks query results. Do not use it for fresh ingest, asset extraction, lifecycle judgment, package building, or submission."
+description: "Maintain Personal Asset Library. Use when the user wants to inspect, review, patch, archive, restore, or verify a personal material asset library after initial build, including “看库概览”“修一条资产”“归档这条不该进库的材料”“看待复核队列”. Prefer caixu-skill when the user asks for the full end-to-end mainline or is unsure which stage to run. This skill loads library overviews and review queues from caixu-data-mcp, applies minimal maintenance actions such as patching or archiving one asset at a time, and re-checks query results. Do not use it for fresh ingest, asset extraction, lifecycle judgment, package building, or submission."
 ---
 
-# maintain-asset-library
+# Maintain Personal Asset Library
 
 在用户要“看库概览”“修一条资产”“归档这条不该进库的材料”“看待复核队列”时使用这个 skill。
 

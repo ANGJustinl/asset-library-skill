@@ -1,9 +1,9 @@
 ---
 name: caixu-check-lifecycle
-description: "Use when the user wants a lifecycle diagnosis for an existing asset library at the lifecycle stage, including “看未来 60 天续办”“查缺件”“判断能不能提交某个目标场景”. Prefer caixu-skill when the user asks for the full end-to-end mainline or is unsure which stage to run. This skill loads assets and a versioned RuleProfileBundle, asks an agent to produce a complete CheckLifecycleData decision, validates readiness and asset references with shared rules helpers, records an audit sidecar, and persists the lifecycle run only when the decision is structurally valid."
+description: "Check Document Renewal Requirements. Use when the user wants a lifecycle diagnosis for an existing asset library at the lifecycle stage, including “看未来 60 天续办”“查缺件”“判断能不能提交某个目标场景”. Prefer caixu-skill when the user asks for the full end-to-end mainline or is unsure which stage to run. This skill loads assets and a versioned RuleProfileBundle, asks an agent to produce a complete CheckLifecycleData decision, validates readiness and asset references with shared rules helpers, records an audit sidecar, and persists the lifecycle run only when the decision is structurally valid."
 ---
 
-# check-lifecycle
+# Check Document Renewal Requirements
 
 在用户要“看未来 60 天续办”“查缺件”“判断能不能提交某个目标场景”时使用这个 skill。
 

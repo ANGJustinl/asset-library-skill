@@ -1,9 +1,9 @@
 ---
 name: caixu-submit-demo
-description: "Use when the user wants the final package submitted to an external judge demo page at the submission stage, including “提交到演示页”“执行最后一步”“上传并记录日志”. Prefer caixu-skill when the user asks for the full end-to-end mainline or is unsure which stage to run. This skill loads the saved package plan and submission profile, checks submission preconditions, uses AutoClaw or OpenClaw browser actions for the real submission, writes back a structured execution_log, and supports dry_run without clicking final submit."
+description: "Submit Package to Demo Page. Use when the user wants the final package submitted to an external judge demo page at the submission stage, including “提交到演示页”“执行最后一步”“上传并记录日志”. Prefer caixu-skill when the user asks for the full end-to-end mainline or is unsure which stage to run. This skill loads the saved package plan and submission profile, checks submission preconditions, uses AutoClaw or OpenClaw browser actions for the real submission, writes back a structured execution_log, and supports dry_run without clicking final submit."
 ---
 
-# submit-demo
+# Submit Package to Demo Page
 
 在用户要“提交到演示页”“执行最后一步”“上传并记录日志”时使用这个 skill。
 

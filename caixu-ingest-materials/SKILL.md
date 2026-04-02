@@ -1,9 +1,9 @@
 ---
 name: caixu-ingest-materials
-description: "Use when the user wants to import a local directory or explicit files into 材序 at the ingest stage, including “导入一批材料”“先把这个目录吃进去”“先建立可继续建库的解析上下文”. Prefer caixu-skill when the user asks for the full end-to-end mainline or is unsure which stage to run. This skill creates or loads a library, starts an ingest pipeline run, lets the agent choose per-file routes over low-level OCR and parser tools, persists ParsedFile records, and hands off library_id plus run_id to build-asset-library. Do not use it for asset extraction, lifecycle judgment, package building, or submission."
+description: "Import Personal Documents. Use when the user wants to import a local directory or explicit files into 材序 at the ingest stage, including “导入一批材料”“先把这个目录吃进去”“先建立可继续建库的解析上下文”. Prefer caixu-skill when the user asks for the full end-to-end mainline or is unsure which stage to run. This skill creates or loads a library, starts an ingest pipeline run, lets the agent choose per-file routes over low-level OCR and parser tools, persists ParsedFile records, and hands off library_id plus run_id to build-asset-library. Do not use it for asset extraction, lifecycle judgment, package building, or submission."
 ---
 
-# ingest-materials
+# Import Personal Documents
 
 在用户要“导入一批材料”“先把这个目录吃进去”“先建立可继续建库的解析上下文”时使用这个 skill。
 

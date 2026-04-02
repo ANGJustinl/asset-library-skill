@@ -1,9 +1,9 @@
 ---
 name: caixu-query-assets
-description: "Use when the user wants to search or filter an existing 材序 asset library at the query stage, including “查我有哪些材料”“看哪些可复用”“按类型筛资产”“用自然语言找相关材料”. Prefer caixu-skill when the user asks for the full end-to-end mainline or is unsure which stage to run. This skill normalizes filters into precise retrieval inputs, uses agent tags plus FTS by default, and only calls the optional semantic vector retrieval function when the user explicitly asks for similar or related materials."
+description: "Search Personal Asset Library. Use when the user wants to search or filter an existing 材序 asset library at the query stage, including “查我有哪些材料”“看哪些可复用”“按类型筛资产”“用自然语言找相关材料”. Prefer caixu-skill when the user asks for the full end-to-end mainline or is unsure which stage to run. This skill normalizes filters into precise retrieval inputs, uses agent tags plus FTS by default, and only calls the optional semantic vector retrieval function when the user explicitly asks for similar or related materials."
 ---
 
-# query-assets
+# Search Personal Asset Library
 
 在用户要“查我有哪些材料”“看哪些可复用”“按类型筛资产”时使用这个 skill。
 

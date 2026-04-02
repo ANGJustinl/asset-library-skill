@@ -1,4 +1,4 @@
 interface:
-  display_name: "Caixu Submit"
+  display_name: "Submit Package to Demo Page"
   short_description: "Phase skill to submit a saved package plan to the judge demo page with structured logging"
   default_prompt: "Use $caixu-submit-demo after the current stage has been identified as final submission, load the package plan and submission profile, preflight readiness and zip paths, use AutoClaw or OpenClaw for browser submission, and always write a structured execution_log."
