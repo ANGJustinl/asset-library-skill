@@ -1,5 +1,7 @@
 # Asset Library Skill | [个人材料资产库Skill](./README.zh-CN.md)
 
+![banner](./assets/banner.png)
+
 `Asset Library Skill` is a skill set built around one idea: turning scattered personal documents into a personal asset library that you can search, reuse, maintain, and revisit over time.
 
 It is not meant to be just a file classifier. It is designed to help you build a durable working library from resumes, certificates, transcripts, proofs, receipts, and other personal materials.
